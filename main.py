@@ -107,7 +107,6 @@ def read_root():
         h1 { color: #fff; text-align: center; margin-bottom: 5px; font-weight: 600; letter-spacing: -0.5px; }
         p.subtitle { text-align: center; color: var(--text-muted); margin-bottom: 30px; font-size: 14px; }
         
-        /* Предупреждающий баннер */
         .disclaimer-banner {
             background-color: rgba(210, 153, 34, 0.1);
             border: 1px solid var(--warning);
@@ -119,7 +118,6 @@ def read_root():
             line-height: 1.5;
         }
 
-        /* Интерактивные вкладки */
         .tabs {
             display: flex;
             border-bottom: 1px solid var(--border-color);
@@ -144,7 +142,6 @@ def read_root():
         .tab-content { display: none; }
         .tab-content.active { display: block; }
 
-        /* Метрики дашборда безопасности */
         .metrics-container {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -195,7 +192,6 @@ def read_root():
         }
         button.submit-btn:hover { background-color: var(--accent-hover); }
         
-        /* Кнопка мгновенного исправления кода */
         button.fix-btn {
             width: 100%;
             background-color: var(--fix-btn-color);
@@ -220,7 +216,6 @@ def read_root():
             display: none; 
         }
         
-        /* Блок вывода безопасного кода */
         .fixed-box {
             margin-top: 25px;
             padding: 25px;
@@ -472,7 +467,7 @@ def analyze_security(data: CodeAnalysisInput):
                 "Authorization": f"Bearer {openai_key}",
                 "Content-Type": "application/json"
             }
-            prompt = f"Analyze this Python source code and its static analysis logs. Write a professional, scary, and high-value security advisory report in English for the company '{data.company_name}' (Project: '{data.project_name}'). Highlight risks of leaks and hacker attacks:\n\nCode:\n{final_code}\n\nLogs:\n{bandit_report}"
+            prompt = f"Analyze this Python source code and its static analysis logs. Write a professional security advisory report in English for the company '{data.company_name}' (Project: '{data.project_name}'):\n\nCode:\n{final_code}\n\nLogs:\n{bandit_report}"
             
             payload = {
                 "model": "gpt-4o-mini",
@@ -496,7 +491,7 @@ def fix_security(data: CodeFixInput):
     openai_key = os.getenv("OPENAI_API_KEY")
     
     if not openai_key:
-        # Умная демо-заглушка авто-исправления кода, которая идеально решает уязвимости в тестовом скрипте
+        # Умная демо-заглушка авто-исправления кода
         return {
             "status": "patched",
             "fixed_code": (
@@ -519,5 +514,17 @@ def fix_security(data: CodeFixInput):
                 "Authorization": f"Bearer {openai_key}",
                 "Content-Type": "application/json"
             }
-            prompt = f"You are a Senior DevSecOps Engineer. Fix all critical security issues in this Python code based on the security report provided. Return ONLY the clean, ready-to-use, secure Python code. Do not include markdown formatting, backticks like 
-http://googleusercontent.com/immersive_entry_chip/0
+            prompt = f"You are a Senior DevSecOps Engineer. Fix all critical security issues in this Python code based on the security report provided. Return ONLY clean code without markdown annotations:\n\nCode:\n{data.vulnerable_code}\n\nReport:\n{data.analysis_report}"
+            
+            payload = {
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.2
+            }
+            response = requests.post("https://api.openai.com/v1/chat/completions", json=payload, headers=headers)
+            return {
+                "status": "patched",
+                "fixed_code": response.json()["choices"][0]["message"]["content"].strip()
+            }
+        except Exception:
+            return {"status": "failed", "fixed_code": "# AI Engine busy. Please try patching again."}
