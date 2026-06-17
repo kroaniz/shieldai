@@ -8,8 +8,6 @@ import requests
 
 app = FastAPI(title="ShieldAI - DevSecOps & Web3 Engine")
 
-ADMIN_TOKEN = "kroaniz_boss_777"
-
 class CodeAnalysisInput(BaseModel):
     company_name: str
     project_name: str
@@ -49,12 +47,9 @@ def fetch_code_from_github(url: str) -> str:
         return f"Error: {str(e)}"
 
 @app.get("/", response_class=HTMLResponse)
-def read_root(request: Request):
-    token_param = request.query_params.get("admin_token", "")
-    is_admin_js = "true" if token_param == ADMIN_TOKEN else "false"
-
-    # СТРОГО БЕЗ БУКВЫ 'f' ПЕРЕД КАВЫЧКАМИ, ЧТОБЫ ИЗБЕЖАТЬ КОНФЛИКТА СКОБОК
-    html_content = """<!DOCTYPE html>
+def read_root():
+    # Чистый HTML-текст. Никаких f-строк, никаких .replace() со стороны Python.
+    return """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -194,7 +189,11 @@ contract VulnerableToken {
 
 <script>
     let activeMode = 'paste-mode';
-    const isFounder = __REPLACE_ADMIN_STATUS__;
+    
+    // ПРОВЕРКА ТОКЕНА ЧЕРЕЗ URL НА СТОРОНЕ БРАУЗЕРА (Самый надежный метод)
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenParam = urlParams.get('admin_token') || '';
+    const isFounder = (tokenParam === 'kroaniz_boss_777');
 
     if (isFounder) {
         document.getElementById('adminBadge').style.display = 'block';
@@ -263,9 +262,6 @@ contract VulnerableToken {
 </script>
 </body>
 </html>"""
-    
-    html_content = html_content.replace("__REPLACE_ADMIN_STATUS__", is_admin_js)
-    return HTMLResponse(content=html_content)
 
 @app.post("/api/v1/analyze-security")
 def analyze_security(data: CodeAnalysisInput):
