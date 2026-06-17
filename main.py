@@ -51,16 +51,18 @@ def fetch_code_from_github(url: str) -> str:
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
     token_param = request.query_params.get("admin_token", "")
+    # Передаем статус админа текстом "true" или "false"
     is_admin_js = "true" if token_param == ADMIN_TOKEN else "false"
 
-    html_content = f"""<!DOCTYPE html>
+    # Используем три кавычки БЕЗ буквы f перед ними, чтобы скобки не вызывали ошибок
+    html_content = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ShieldAI // Next-Gen DevSecOps & Web3 Platform</title>
     <style>
-        :root {{
+        :root {
             --bg-color: #0d1117;
             --panel-bg: #161b22;
             --accent-color: #238636;
@@ -73,32 +75,32 @@ def read_root(request: Request):
             --warning: #d29922;
             --info: #58a6ff;
             --border-color: #30363d;
-        }}
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; background-color: var(--bg-color); margin: 0; padding: 40px 20px; color: var(--text-main); }}
-        .container {{ max-width: 900px; background: var(--panel-bg); padding: 40px; border-radius: 12px; border: 1px solid var(--border-color); box-shadow: 0 8px 24px rgba(0,0,0,0.5); margin: 0 auto; }}
-        h1 {{ color: #fff; text-align: center; margin-bottom: 5px; font-weight: 600; }}
-        p.subtitle {{ text-align: center; color: var(--text-muted); margin-bottom: 30px; font-size: 14px; }}
-        .tabs {{ display: flex; border-bottom: 1px solid var(--border-color); margin-bottom: 25px; }}
-        .tab-btn {{ background: none; border: none; color: var(--text-muted); padding: 10px 20px; cursor: pointer; font-size: 14px; font-weight: 500; border-bottom: 2px solid transparent; }}
-        .tab-btn.active {{ color: #fff; border-bottom: 2px solid #58a6ff; }}
-        .tab-content {{ display: none; }}
-        .tab-content.active {{ display: block; }}
-        .form-group {{ margin-bottom: 25px; }}
-        label {{ display: block; font-weight: 500; margin-bottom: 8px; color: #fff; font-size: 14px; }}
-        input, textarea {{ width: 100%; padding: 12px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; box-sizing: border-box; font-size: 15px; color: var(--text-main); }}
-        textarea {{ font-family: monospace; min-height: 180px; }}
-        button.submit-btn {{ width: 100%; background-color: var(--accent-color); color: white; padding: 16px; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; }}
-        button.fix-btn {{ width: 100%; background-color: var(--fix-btn-color); color: white; padding: 12px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 15px; }}
-        .result-box {{ margin-top: 25px; padding: 25px; background-color: #1f191d; border-left: 4px solid var(--danger); border-radius: 6px; display: none; }}
-        .fixed-box {{ margin-top: 25px; padding: 25px; background-color: #191f1a; border-left: 4px solid var(--accent-color); border-radius: 6px; display: none; }}
-        pre {{ white-space: pre-wrap; font-size: 14px; color: #ff7b72; font-family: monospace; }}
-        .live-feed {{ background: #0d1117; padding: 15px; border-radius: 6px; border: 1px solid var(--border-color); font-family: monospace; font-size: 12px; color: #7ee787; margin-bottom: 20px; display: none; }}
-        .modal-overlay {{ position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; visibility: hidden; transition: all 0.3s; }}
-        .modal-overlay.active {{ opacity: 1; visibility: visible; }}
-        .modal-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 35px; max-width: 450px; width: 100%; text-align: center; position: relative; }}
-        .crypto-address {{ background: #0d1117; border: 1px solid #30363d; padding: 12px; border-radius: 6px; font-family: monospace; color: #58a6ff; margin: 20px 0; word-break: break-all; }}
-        .close-modal-btn {{ position: absolute; top: 15px; right: 15px; background: none; border: none; color: #8b949e; font-size: 18px; cursor: pointer; }}
-        .badge {{ background: #d29922; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-left: 10px; vertical-align: middle; }}
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; background-color: var(--bg-color); margin: 0; padding: 40px 20px; color: var(--text-main); }
+        .container { max-width: 900px; background: var(--panel-bg); padding: 40px; border-radius: 12px; border: 1px solid var(--border-color); box-shadow: 0 8px 24px rgba(0,0,0,0.5); margin: 0 auto; }
+        h1 { color: #fff; text-align: center; margin-bottom: 5px; font-weight: 600; }
+        p.subtitle { text-align: center; color: var(--text-muted); margin-bottom: 30px; font-size: 14px; }
+        .tabs { display: flex; border-bottom: 1px solid var(--border-color); margin-bottom: 25px; }
+        .tab-btn { background: none; border: none; color: var(--text-muted); padding: 10px 20px; cursor: pointer; font-size: 14px; font-weight: 500; border-bottom: 2px solid transparent; }
+        .tab-btn.active { color: #fff; border-bottom: 2px solid #58a6ff; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .form-group { margin-bottom: 25px; }
+        label { display: block; font-weight: 500; margin-bottom: 8px; color: #fff; font-size: 14px; }
+        input, textarea { width: 100%; padding: 12px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; box-sizing: border-box; font-size: 15px; color: var(--text-main); }
+        textarea { font-family: monospace; min-height: 180px; }
+        button.submit-btn { width: 100%; background-color: var(--accent-color); color: white; padding: 16px; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; }
+        button.fix-btn { width: 100%; background-color: var(--fix-btn-color); color: white; padding: 12px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 15px; }
+        .result-box { margin-top: 25px; padding: 25px; background-color: #1f191d; border-left: 4px solid var(--danger); border-radius: 6px; display: none; }
+        .fixed-box { margin-top: 25px; padding: 25px; background-color: #191f1a; border-left: 4px solid var(--accent-color); border-radius: 6px; display: none; }
+        pre { white-space: pre-wrap; font-size: 14px; color: #ff7b72; font-family: monospace; }
+        .live-feed { background: #0d1117; padding: 15px; border-radius: 6px; border: 1px solid var(--border-color); font-family: monospace; font-size: 12px; color: #7ee787; margin-bottom: 20px; display: none; }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; visibility: hidden; transition: all 0.3s; }
+        .modal-overlay.active { opacity: 1; visibility: visible; }
+        .modal-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 35px; max-width: 450px; width: 100%; text-align: center; position: relative; }
+        .crypto-address { background: #0d1117; border: 1px solid #30363d; padding: 12px; border-radius: 6px; font-family: monospace; color: #58a6ff; margin: 20px 0; word-break: break-all; }
+        .close-modal-btn { position: absolute; top: 15px; right: 15px; background: none; border: none; color: #8b949e; font-size: 18px; cursor: pointer; }
+        .badge { background: #d29922; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-left: 10px; vertical-align: middle; }
     </style>
 </head>
 <body>
@@ -136,16 +138,16 @@ def connect_to_db():
             <textarea id="web3Code" placeholder="Paste .sol contract code here...">// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract VulnerableToken {{
+contract VulnerableToken {
     mapping(address => uint) public balances;
     
-    function withdraw(uint _amount) public {{
+    function withdraw(uint _amount) public {
         require(balances[msg.sender] >= _amount);
-        (bool success, ) = msg.sender.call{{value: _amount}}("");
+        (bool success, ) = msg.sender.call{value: _amount}("");
         require(success);
         balances[msg.sender] -= _amount;
-    }}
-}}</textarea>
+    }
+}</textarea>
         </div>
     </div>
 
@@ -193,25 +195,26 @@ contract VulnerableToken {{
 
 <script>
     let activeMode = 'paste-mode';
-    const isFounder = {is_admin_js};
+    // Подставим значение динамически через замену строки, избегая конфликтов f-строк
+    const isFounder = __REPLACE_ADMIN_STATUS__;
 
-    if (isFounder) {{
+    if (isFounder) {
         document.getElementById('adminBadge').style.display = 'block';
-    }}
+    }
 
-    function switchMode(modeId) {{
+    function switchMode(modeId) {
         activeMode = modeId;
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-        if (window.event && window.event.target) {{
+        if (window.event && window.event.target) {
             window.event.target.classList.add('active');
-        }}
+        }
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         document.getElementById(modeId).classList.add('active');
-    }}
+    }
 
-    function sleep(ms) {{ return new Promise(resolve => setTimeout(resolve, ms)); }}
+    function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
-    async function runAudit() {{
+    async function runAudit() {
         const btn = document.querySelector('.submit-btn');
         const feed = document.getElementById('liveFeed');
         btn.disabled = true;
@@ -235,35 +238,36 @@ contract VulnerableToken {{
         document.getElementById('metricsDashboard').style.display = 'grid';
         document.getElementById('resultBox').style.display = 'block';
 
-        if(activeMode === 'paste-mode') {{
+        if(activeMode === 'paste-mode') {
             document.getElementById('resultText').innerText = "[SHIELD-AI ADVISORY REPORT]\\nCRITICAL: Hardcoded administrative password found inside active database connection sequence.\\nHIGH RISK: Shell execution bypass via os.system allows RCE payload delivery.";
-        }} else {{
+        } else {
             document.getElementById('resultText').innerText = "[SHIELD-AI WEB3 ADVISORY REPORT]\\nCRITICAL: Reentrancy vulnerability inside withdraw(). State variable updates occur AFTER token transfers.\\nVector allows smart contract balance drainage via fallback recursion.";
-        }}
+        }
         btn.disabled = false;
-    }}
+    }
 
-    async function handleRemediation() {{
-        if (isFounder) {{
+    async function handleRemediation() {
+        if (isFounder) {
             document.getElementById('fixedBox').style.display = 'block';
-            if (activeMode === 'paste-mode') {{
+            if (activeMode === 'paste-mode') {
                 document.getElementById('fixedCodeText').innerText = "import os\\nimport subprocess\\n\\ndef connect_to_db():\\n    # FIXED: Credentials pulled from vault env parameters\\n    db_password = os.getenv('DB_SECURE_PASSWORD')\\n\\ndef execute_query(query):\\n    # FIXED: Subprocess array injection block\\n    subprocess.run(['squid', '-q', query], shell=False)";
-            }} else {{
-                document.getElementById('fixedCodeText').innerText = "contract SecureToken {{\\n    mapping(address => uint) public balances;\\n\\n    // FIXED: CEI Pattern enforced & State updated before external call\\n    function withdraw(uint _amount) public {{\\n        require(balances[msg.sender] >= _amount);\\n        balances[msg.sender] -= _amount;\\n        (bool success, ) = msg.sender.call{{value: _amount}}(\"\");\\n        require(success);\\n    }}\\n}}";
-            }}
-            document.getElementById('fixedBox').scrollIntoView({{ behavior: 'smooth' }});
-        }} else {{
+            } else {
+                document.getElementById('fixedCodeText').innerText = "contract SecureToken {\\n    mapping(address => uint) public balances;\\n\\n    // FIXED: CEI Pattern enforced & State updated before external call\\n    function withdraw(uint _amount) public {\\n        require(balances[msg.sender] >= _amount);\\n        balances[msg.sender] -= _amount;\\n        (bool success, ) = msg.sender.call{value: _amount}(\"\");\\n        require(success);\\n    }\\n}";
+            }
+            document.getElementById('fixedBox').scrollIntoView({ behavior: 'smooth' });
+        } else {
             triggerPaywall();
-        }}
-    }}
+        }
+    }
 
-    function triggerPaywall() {{ document.getElementById('paymentModal').classList.add('active'); }}
-    function closePaywall() {{ document.getElementById('paymentModal').classList.remove('active'); }}
+    function triggerPaywall() { document.getElementById('paymentModal').classList.add('active'); }
+    function closePaywall() { document.getElementById('paymentModal').classList.remove('active'); }
 </script>
 </body>
 </html>"""
+    
+    # Безопасно подменяем маркер на статус админа
+    html_content = html_content.replace("__REPLACE_ADMIN_STATUS__", is_admin_js)
     return HTMLResponse(content=html_content)
 
 @app.post("/api/v1/analyze-security")
-def analyze_security(data: CodeAnalysisInput):
-    return {"status": "completed", "ai_analysis": "Handled client-side via sandbox simulation logs."}
