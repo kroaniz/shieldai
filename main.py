@@ -1,11 +1,11 @@
 import ast
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="CodeInsight Pro Platform")
 
-# Secret key to activate Pro features (simulating a premium subscription)
+# Secret key to activate Pro features
 PRO_LICENSE_KEY = "PRO_PREMIUM_TOKEN_2026"
 
 class AuditRequest(BaseModel):
@@ -23,13 +23,21 @@ async def execute_audit(data: AuditRequest):
             "message": "Input data is missing. Please paste your source code to proceed."
         }
     
-    # 1. Base Functional Module (Available to all users in Demo Mode)
     try:
+        # Базовый парсинг структуры кода через AST
         tree = ast.parse(source_code)
-        lines_count = len(source_code.splitlines())
+        raw_lines = source_code.splitlines()
+        lines_count = len(raw_lines)
+        
         functions = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
         classes = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
         
+        # Подсчет комментариев (для Pro-аналитики)
+        comment_lines = 0
+        for line in raw_lines:
+            if line.strip().startswith("#"):
+                comment_lines += 1
+                
         response_data = {
             "status": "demo_success",
             "lines": lines_count,
@@ -38,13 +46,37 @@ async def execute_audit(data: AuditRequest):
             "message": "Basic structural audit completed successfully. Syntax is valid, no compilation errors found."
         }
         
-        # 2. Premium Functional Module (Activated only with a valid Pro Key)
+        # Расширенный коммерческий функционал (Активируется по ключу)
         if user_key == PRO_LICENSE_KEY:
+            # Вычисляем плотность комментариев в процентах
+            comment_density = round((comment_lines / lines_count) * 100) if lines_count > 0 else 0
+            
+            # Динамическая генерация архитектурных рекомендаций на основе реального кода
+            if lines_count > 25 and len(functions) <= 1:
+                patch_advice = (
+                    "## High Complexity Detected:\\n"
+                    "Your script contains a large block of monolithic code. "
+                    "Pro Recommendation: Break down your logic into distinct modular functions "
+                    "to lower cognitive load and improve testability."
+                )
+                maintainability = "Fair"
+            elif lines_count == 0:
+                patch_advice = "## Empty File:\\nNo structural patterns could be verified."
+                maintainability = "N/A"
+            else:
+                patch_advice = (
+                    "## Architecture Standard Compliant:\\n"
+                    "Code syntax density and function-to-line ratio are well balanced. "
+                    "No immediate architectural refactoring required."
+                )
+                maintainability = "Excellent"
+
             response_data["status"] = "pro_success"
-            response_data["message"] = "PRO Mode successfully activated. Deep structural compliance analysis executed."
+            response_data["message"] = "PRO Mode successfully activated. Advanced structural metrics generated."
             response_data["advanced_metrics"] = {
-                "architecture_valid": True,
-                "remediation_patch": "## Generated Pro Recommendation:\\nComponent structural matrix complies with industry standards. Automated architecture optimization patch is successfully generated and ready for deployment."
+                "maintainability": maintainability,
+                "comment_density": f"{comment_density}%",
+                "remediation_patch": patch_advice
             }
         
         return response_data
@@ -57,7 +89,6 @@ async def execute_audit(data: AuditRequest):
 
 @app.get("/", response_class=HTMLResponse)
 async def get_application_interface():
-    # Pure HTML/CSS/JS interface optimized for global deployment (no f-strings)
     html_content = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -164,12 +195,16 @@ async def get_application_interface():
 
         <div id="proBanner" class="pro-banner">
             <h4 style="margin-top: 0; color: var(--accent-gold);">🔒 Advanced Pro Metrics Available</h4>
-            <p style="font-size: 13px; margin-bottom: 0;">Automated architecture remediation recommendations and compliance structural logs are exclusive to active Pro License holders.</p>
+            <p style="font-size: 13px; margin-bottom: 0;">Automated architecture remediation recommendations, maintainability index, and compliance logs are exclusive to active Pro License holders.</p>
         </div>
 
         <div id="proUnlocked" class="pro-unlocked">
-            <h4 style="margin-top: 0; color: #7ee787;">⚡ Pro Infrastructure Package Activated</h4>
-            <pre id="proPatchText" style="white-space: pre-wrap; font-family: monospace; text-align: left; font-size: 13px; color: #7ee787;"></pre>
+            <h4 style="margin-top: 0; color: #7ee787;">⚡ Pro Analytics & Infrastructure Package Unlocked</h4>
+            <div class="metrics" style="margin-bottom: 20px;">
+                <div class="card" style="border-color: #238636;"><div id="mMaintain" class="card-num" style="color: #7ee787;">N/A</div><div class="card-label">Maintainability</div></div>
+                <div class="card" style="border-color: #238636;"><div id="mComments" class="card-num" style="color: #7ee787;">0%</div><div class="card-label">Comment Density</div></div>
+            </div>
+            <pre id="proPatchText" style="white-space: pre-wrap; font-family: monospace; text-align: left; font-size: 13px; color: #7ee787; background: #0d1117; padding: 15px; border-radius: 6px; border: 1px solid #30363d;"></pre>
         </div>
     </div>
 </div>
@@ -213,9 +248,12 @@ async def get_application_interface():
                 document.getElementById("mLines").innerText = result.lines;
                 document.getElementById("mFuncs").innerText = result.functions_count;
                 document.getElementById("mClasses").innerText = result.classes_count;
+                
+                // Дополнительные Pro-метрики
+                document.getElementById("mMaintain").innerText = result.advanced_metrics.maintainability;
+                document.getElementById("mComments").innerText = result.advanced_metrics.comment_density;
                 document.getElementById("proPatchText").innerText = result.advanced_metrics.remediation_patch;
             } else {
-                // Standard Demo Mode view
                 baseMetrics.style.display = "grid";
                 proBanner.style.display = "block";
                 proUnlocked.style.display = "none";
