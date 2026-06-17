@@ -53,7 +53,7 @@ def fetch_code_from_github(url: str) -> str:
 def read_root(request: Request):
     # Проверяем, зашел ли ты как админ через секретную ссылку ?admin_token=...
     token_param = request.query_params.get("admin_token", "")
-    is_admin = "true" if token_param == ADMIN_TOKEN else "false"
+    is_admin_js = "true" if token_param == ADMIN_TOKEN else "false"
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -196,7 +196,7 @@ contract VulnerableToken {{
 
 <script>
     let activeMode = 'paste-mode';
-    const isFounder = {is_admin};
+    const isFounder = {is_admin_js};
 
     if (isFounder) {{
         document.getElementById('adminBadge').style.display = 'block';
@@ -263,4 +263,3 @@ contract VulnerableToken {{
 </script>
 </body>
 </html>"""
-    return HTMLResponse(content=html_content)
