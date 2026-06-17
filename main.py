@@ -44,7 +44,7 @@ async def execute_audit(data: AuditRequest):
             response_data["message"] = "PRO Mode successfully activated. Deep structural compliance analysis executed."
             response_data["advanced_metrics"] = {
                 "architecture_valid": True,
-                "remediation_patch": "## Generated Pro Recommendation:\nComponent structural matrix complies with industry standards. Automated architecture optimization patch is successfully generated and ready for deployment."
+                "remediation_patch": "## Generated Pro Recommendation:\\nComponent structural matrix complies with industry standards. Automated architecture optimization patch is successfully generated and ready for deployment."
             }
         
         return response_data
@@ -234,7 +234,3 @@ async def get_application_interface():
 </body>
 </html>"""
     return HTMLResponse(content=html_content)
-
-@app.post("/api/v1/analyze-security")
-def analyze_security(data: CodeAnalysisInput):
-    return {"status": "completed", "ai_analysis": "Handled via secure sandbox protocols."}
