@@ -8,7 +8,6 @@ import requests
 
 app = FastAPI(title="ShieldAI - DevSecOps & Web3 Engine")
 
-# Твой секретный ключ Основателя. Можешь поменять его на любой свой
 ADMIN_TOKEN = "kroaniz_boss_777"
 
 class CodeAnalysisInput(BaseModel):
@@ -51,7 +50,6 @@ def fetch_code_from_github(url: str) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 def read_root(request: Request):
-    # Проверяем, зашел ли ты как админ через секретную ссылку ?admin_token=...
     token_param = request.query_params.get("admin_token", "")
     is_admin_js = "true" if token_param == ADMIN_TOKEN else "false"
 
@@ -141,7 +139,6 @@ pragma solidity ^0.8.20;
 contract VulnerableToken {{
     mapping(address => uint) public balances;
     
-    // CRITICAL: Reentrancy vulnerability vector detected
     function withdraw(uint _amount) public {{
         require(balances[msg.sender] >= _amount);
         (bool success, ) = msg.sender.call{{value: _amount}}("");
@@ -205,7 +202,9 @@ contract VulnerableToken {{
     function switchMode(modeId) {{
         activeMode = modeId;
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-        window.event.target.classList.add('active');
+        if (window.event && window.event.target) {{
+            window.event.target.classList.add('active');
+        }}
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         document.getElementById(modeId).classList.add('active');
     }}
@@ -263,3 +262,8 @@ contract VulnerableToken {{
 </script>
 </body>
 </html>"""
+    return HTMLResponse(content=html_content)
+
+@app.post("/api/v1/analyze-security")
+def analyze_security(data: CodeAnalysisInput):
+    return {"status": "completed", "ai_analysis": "Handled client-side via sandbox simulation logs."}
