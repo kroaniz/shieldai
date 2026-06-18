@@ -101,8 +101,7 @@ async def execute_audit(data: AuditRequest):
 
             if detected_issues:
                 issue_list_str = "\\n".join([f"- {issue}" for issue in detected_issues])
-                patch_advice = f"### ⚠️ CRITICAL INFRASTRUCTURE RISKS DETECTED:\\n{issue_list_str}\\n\\n### 🛡️ AUTOMATED REMEDIATION PATCH:\\n"
                 
-                if has_unsafe_execution:
-                    patch_advice += "
+                # Формируем чистый текстовый патч безопасности в одну строку, исключая синтаксические разрывы
+                patch_advice = f"### ⚠️ CRITICAL INFRASTRUCTURE RISKS DETECTED:\\n{issue_list_str}\\n\\n### 🛡️ AUTOMATED REMEDIATION PATCH:\\n
 http://googleusercontent.com/immersive_entry_chip/0
