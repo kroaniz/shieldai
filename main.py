@@ -89,7 +89,7 @@ async def execute_audit(data: AuditRequest):
             total_debt_usd = round(base_debt + security_penalty + structural_penalty, 2)
             hours_estimated = round(total_debt_usd / 45, 1) if total_debt_usd > 0 else 0.2
 
-            # Генератор узлов для интерактивного графа зависимостей
+            # Generator для интерактивного графа зависимостей
             visual_nodes = [{"name": "App Root", "type": "root", "status": "secure" if not detected_issues else "unsecure"}]
             for cls in classes:
                 visual_nodes.append({"name": f"class {cls}", "type": "class", "status": "secure"})
@@ -102,7 +102,6 @@ async def execute_audit(data: AuditRequest):
             if detected_issues:
                 issue_list_str = "\n".join([f"- {issue}" for issue in detected_issues])
                 
-                # ТРОЙНЫЕ КАВЫЧКИ: Текст теперь может переноситься как угодно, это 100% стабильно
                 patch_advice = f"""### ⚠️ CRITICAL INFRASTRUCTURE RISKS DETECTED:
 {issue_list_str}
 
@@ -209,10 +208,8 @@ async def get_application_interface():
         .modal-content { background-color: var(--panel-dark); margin: 10% auto; padding: 30px; border: 1px solid var(--border-color); width: 90%; max-width: 500px; border-radius: 12px; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.7); }
         .close-btn { position: absolute; right: 20px; top: 15px; color: var(--text-muted); font-size: 24px; font-weight: bold; cursor: pointer; }
         .close-btn:hover { color: #fff; }
-        .payment-option { background: var(--bg-dark); border: 1px solid var(--border-color); padding: 15px; border-radius: 8px; margin-top: 15px; text-align: left; }
-        .crypto-address { background: #0d1117; border: 1px solid #21262d; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 12px; color: #58a6ff; word-break: break-all; margin-top: 8px; }
-        .btn-link { display: block; text-align: center; background: #21262d; color: #fff; padding: 10px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 13px; margin-top: 10px; border: 1px solid var(--border-color); }
-        .btn-link:hover { background: #30363d; }
+        .payment-option { background: var(--bg-dark); border: 1px solid var(--border-color); padding: 20px; border-radius: 8px; margin-top: 15px; text-align: left; }
+        .crypto-address { background: #0d1117; border: 1px solid #21262d; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; color: #58a6ff; word-break: break-all; margin-top: 8px; text-align: center; letter-spacing: 0.5px; }
     </style>
 </head>
 <body>
@@ -276,15 +273,10 @@ async def get_application_interface():
         <h3 style="margin-top: 0; color: #fff; text-align: center;">Authorize Pro License</h3>
         <p style="font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 20px;">Deploy fully-automated vulnerability architecture checking and mitigation code snippets.</p>
         <div class="payment-option">
-            <div style="font-weight: 600; font-size: 14px; color: #7ee787;">Method 1: Digital Asset Settlement (USDT TRC-20)</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Transfer exactly <strong>19 USDT</strong> directly to the network node below:</div>
-            <div class="crypto-address">TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t</div>
-            <div style="font-size: 11px; color: var(--accent-gold); margin-top: 6px;">💡 Forward your transaction ledger hash to support to receive your dynamic token.</div>
-        </div>
-        <div class="payment-option">
-            <div style="font-weight: 600; font-size: 14px; color: #58a6ff;">Method 2: Standard Acquiring (Visa / MasterCard)</div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Global payment gateway processing via secure merchant accounts.</div>
-            <a href="https://ko-fi.com" target="_blank" class="btn-link">💳 Pay Securely via Visa / MasterCard / PayPal</a>
+            <div style="font-weight: 600; font-size: 14px; color: #7ee787; text-align: center; margin-bottom: 10px;">Method: Digital Asset Settlement (USDT TRC-20)</div>
+            <div style="font-size: 12px; color: var(--text-muted); text-align: center;">Transfer exactly <strong>19 USDT</strong> directly to the secure network node below:</div>
+            <div class="crypto-address">TWcaHG75Sv5ssvdTU1Am6rPw5DRtoJB1hi</div>
+            <div style="font-size: 11px; color: var(--accent-gold); margin-top: 15px; line-height: 1.4; text-align: center;">💡 After making the transfer, send your transaction hash (txID) or screenshot along with your target Email address to our Telegram support node to receive your premium access token instantly.</div>
         </div>
     </div>
 </div>
