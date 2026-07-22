@@ -1,13 +1,67 @@
 import ast
 import hashlib
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+import os
+import requests
+from fastapi import FastAPI, Form
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="CodeInsight Enterprise Pro Platform")
 
 # СЕКРЕТНЫЙ КЛЮЧ-СОЛЬ. Используется для генерации уникальных лицензий.
 SECRET_SIGNING_SALT = "GLOBAL_CODEINSIGHT_SECURE_TOKEN_2026_PRO"
+
+
+# ==========================================
+# 1. УВЕДОМЛЕНИЯ В DISCORD (WEBHOOK)
+# ==========================================
+
+def send_discord_alert(email: str, txid: str) -> bool:
+    # Сервер забирает ссылку из переменной окружения DISCORD_WEBHOOK_URL
+    webhook_url = os.getenv("https://discord.com/api/webhooks/1529532713328054274/MhjeBaa1OAskAN5HdnsOKAHJFHrr0v5CV0JEv26J1jY4ny5N5Z5LcDV1MO_dcvpvEnE8")
+    
+    if not webhook_url:
+        print("[WARNING] DISCORD_WEBHOOK_URL environment variable is missing.")
+        return False
+
+    # Красивое форматирование карточки (Embed)
+    payload = {
+        "username": "CodeInsight Payment Alert",
+        "avatar_url": "https://cdn-icons-png.flaticon.com/512/1067/1067357.png",
+        "embeds": [
+            {
+                "title": "🚀 New Pro License Payment Submitted!",
+                "color": 3066993,  # Зеленый цвет акцента
+                "fields": [
+                    {
+                        "name": "📧 Customer Email",
+                        "value": f"`{email}`",
+                        "inline": True
+                    },
+                    {
+                        "name": "🔗 Transaction ID (TxID)",
+                        "value": f"`{txid}`",
+                        "inline": False
+                    }
+                ],
+                "footer": {
+                    "text": "CodeInsight Enterprise Platform // Verification Node"
+                }
+            }
+        ]
+    }
+
+    try:
+        response = requests.post(webhook_url, json=payload, timeout=5)
+        return response.status_code in [200, 204]
+    except Exception as e:
+        print(f"[ERROR] Failed to send Discord notification: {e}")
+        return False
+
+
+# ==========================================
+# 2. МОДЕЛИ И ЛОГИКА ЛИЦЕНЗИРОВАНИЯ
+# ==========================================
 
 class AuditRequest(BaseModel):
     code: str
@@ -33,6 +87,28 @@ def is_valid_pro_key(user_key: str) -> bool:
         return token_hash == expected_hash
     except Exception:
         return False
+
+
+# ==========================================
+# 3. API ЭНДПОИНТЫ
+# ==========================================
+
+@app.post("/api/submit-payment")
+async def submit_payment(email: str = Form(...), txid: str = Form(...)):
+    if not email.strip() or not txid.strip():
+        return JSONResponse(
+            status_code=400, 
+            content={"status": "error", "message": "Email and TxID are required."}
+        )
+
+    # Отправка мгновенного уведомления в Discord
+    sent = send_discord_alert(email, txid)
+    
+    return JSONResponse(content={
+        "status": "success", 
+        "message": "Payment details submitted successfully! License key will be emailed after blockchain verification."
+    })
+
 
 @app.post("/api/v1/audit")
 async def execute_audit(data: AuditRequest):
@@ -153,6 +229,11 @@ db_password = os.getenv('ENTERPRISE_VAULT_DB_PASS')
             "message": f"Critical syntax defect identified on line {e.lineno}: {e.msg}"
         }
 
+
+# ==========================================
+# 4. ВЕБ-ИНТЕРФЕЙС (HTML / JS / CSS)
+# ==========================================
+
 @app.get("/", response_class=HTMLResponse)
 async def get_application_interface():
     html_content = """<!DOCTYPE html>
@@ -182,7 +263,7 @@ async def get_application_interface():
         .form-group { margin-bottom: 20px; }
         label { display: block; margin-bottom: 8px; color: #fff; font-size: 14px; font-weight: 500; }
         textarea { width: 100%; height: 180px; background-color: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-main); padding: 14px; border-radius: 6px; box-sizing: border-box; font-family: monospace; font-size: 14px; resize: vertical; }
-        input[type="text"] { width: 100%; padding: 12px; background-color: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-main); border-radius: 6px; box-sizing: border-box; font-family: monospace; }
+        input[type="text"], input[type="email"] { width: 100%; padding: 12px; background-color: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-main); border-radius: 6px; box-sizing: border-box; font-family: monospace; }
         .actions { display: grid; grid-template-columns: 1fr; gap: 15px; margin-top: 15px; }
         button { padding: 15px; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; color: #fff; transition: background-color 0.2s; }
         .btn-audit { background-color: var(--btn-green); }
@@ -205,7 +286,7 @@ async def get_application_interface():
         .node-unsecure { border-color: var(--danger-red); color: var(--danger-red); box-shadow: 0 0 15px rgba(248,81,73,0.4); animation: pulse 2s infinite; }
         @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.03); } 100% { transform: scale(1); } }
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8); backdrop-filter: blur(4px); }
-        .modal-content { background-color: var(--panel-dark); margin: 10% auto; padding: 30px; border: 1px solid var(--border-color); width: 90%; max-width: 500px; border-radius: 12px; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.7); }
+        .modal-content { background-color: var(--panel-dark); margin: 8% auto; padding: 30px; border: 1px solid var(--border-color); width: 90%; max-width: 500px; border-radius: 12px; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.7); }
         .close-btn { position: absolute; right: 20px; top: 15px; color: var(--text-muted); font-size: 24px; font-weight: bold; cursor: pointer; }
         .close-btn:hover { color: #fff; }
         .payment-option { background: var(--bg-dark); border: 1px solid var(--border-color); padding: 20px; border-radius: 8px; margin-top: 15px; text-align: left; }
@@ -267,16 +348,34 @@ async def get_application_interface():
     </div>
 </div>
 
+<!-- Payment Modal with Discord Webhook Integration -->
 <div id="paymentModal" class="modal">
     <div class="modal-content">
         <span class="close-btn" onclick="closePaymentModal()">&times;</span>
         <h3 style="margin-top: 0; color: #fff; text-align: center;">Authorize Pro License</h3>
         <p style="font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 20px;">Deploy fully-automated vulnerability architecture checking and mitigation code snippets.</p>
+        
         <div class="payment-option">
             <div style="font-weight: 600; font-size: 14px; color: #7ee787; text-align: center; margin-bottom: 10px;">Method: Digital Asset Settlement (USDT TRC-20)</div>
             <div style="font-size: 12px; color: var(--text-muted); text-align: center;">Transfer exactly <strong>19 USDT</strong> directly to the secure network node below:</div>
             <div class="crypto-address">TWcaHG75Sv5ssvdTU1Am6rPw5DRtoJB1hi</div>
-            <div style="font-size: 11px; color: var(--accent-gold); margin-top: 15px; line-height: 1.4; text-align: center;">💡 After making the transfer, send your transaction hash (txID) or screenshot along with your target Email address to our Telegram support node to receive your premium access token instantly.</div>
+            
+            <!-- Payment Form -->
+            <form id="paymentForm" onsubmit="submitPaymentForm(event)" style="margin-top: 20px;">
+                <div style="margin-bottom: 12px;">
+                    <label style="font-size: 12px; color: var(--text-muted);">Your Email Address:</label>
+                    <input type="email" id="payEmail" required placeholder="dev@company.com" style="margin-top: 4px;">
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="font-size: 12px; color: var(--text-muted);">Transaction Hash (TxID):</label>
+                    <input type="text" id="payTxid" required placeholder="Paste TxID here..." style="margin-top: 4px;">
+                </div>
+                <button type="submit" id="paySubmitBtn" class="btn-pay" style="width: 100%; text-align: center; margin-top: 0; border: none;">
+                    Confirm Settlement & Submit TxID
+                </button>
+            </form>
+            
+            <div id="payStatusMsg" style="font-size: 12px; text-align: center; margin-top: 12px; display: none; line-height: 1.4;"></div>
         </div>
     </div>
 </div>
@@ -285,6 +384,46 @@ async def get_application_interface():
     function openPaymentModal() { document.getElementById("paymentModal").style.display = "block"; }
     function closePaymentModal() { document.getElementById("paymentModal").style.display = "none"; }
     window.onclick = function(event) { const modal = document.getElementById("paymentModal"); if (event.target == modal) { modal.style.display = "none"; } }
+
+    async function submitPaymentForm(event) {
+        event.preventDefault();
+        const email = document.getElementById("payEmail").value;
+        const txid = document.getElementById("payTxid").value;
+        const btn = document.getElementById("paySubmitBtn");
+        const statusMsg = document.getElementById("payStatusMsg");
+
+        btn.disabled = true;
+        btn.innerText = "Processing Notification...";
+
+        const formData = new FormData();
+        formData.append("email", email);
+        formData.append("txid", txid);
+
+        try {
+            const res = await fetch("/api/submit-payment", {
+                method: "POST",
+                body: formData
+            });
+            const result = await res.json();
+            
+            statusMsg.style.display = "block";
+            if (result.status === "success") {
+                statusMsg.style.color = "#7ee787";
+                statusMsg.innerText = "✅ " + result.message;
+                document.getElementById("paymentForm").reset();
+            } else {
+                statusMsg.style.color = "var(--danger-red)";
+                statusMsg.innerText = "❌ " + (result.message || "Failed to submit payment info.");
+            }
+        } catch (e) {
+            statusMsg.style.display = "block";
+            statusMsg.style.color = "var(--danger-red)";
+            statusMsg.innerText = "❌ Network communication error.";
+        } finally {
+            btn.disabled = false;
+            btn.innerText = "Confirm Settlement & Submit TxID";
+        }
+    }
 
     async function requestAnalysis() {
         const codeInput = document.getElementById("codeBody").value;
