@@ -1,4 +1,5 @@
 fastapi
 uvicorn
 requests
-bandit
+python-multipart
+pydantic
