@@ -1,6 +1,12 @@
 FROM python:3.10-slim
+
 WORKDIR /app
-RUN pip install fastapi uvicorn requests pydantic bandit
-COPY main.py /app/main.py
-EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# Отключаем кэш pip, чтобы 100% установился python-multipart
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Принудительно передаем порт, который ожидает Render ($PORT)
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000}"]
