@@ -17,21 +17,24 @@ SECRET_SIGNING_SALT = "GLOBAL_CODEINSIGHT_SECURE_TOKEN_2026_PRO"
 # ==========================================
 
 def send_discord_alert(email: str, txid: str) -> bool:
-    # Сервер забирает ссылку из переменной окружения DISCORD_WEBHOOK_URL
-    webhook_url = os.getenv("https://discord.com/api/webhooks/1529532713328054274/MhjeBaa1OAskAN5HdnsOKAHJFHrr0v5CV0JEv26J1jY4ny5N5Z5LcDV1MO_dcvpvEnE8")
+    # Автоматически берет переменную с Render или использует твой URL по умолчанию
+    webhook_url = os.getenv(
+        "DISCORD_WEBHOOK_URL",
+        "https://discord.com/api/webhooks/1529532713328054274/MhjeBaa1OAskAN5HdnsOKAHJFHrr0v5CV0JEv26J1jY4ny5N5Z5LcDV1MO_dcvpvEnE8"
+    )
     
     if not webhook_url:
         print("[WARNING] DISCORD_WEBHOOK_URL environment variable is missing.")
         return False
 
-    # Красивое форматирование карточки (Embed)
+    # Форматирование карт-уведомления (Embed)
     payload = {
         "username": "CodeInsight Payment Alert",
         "avatar_url": "https://cdn-icons-png.flaticon.com/512/1067/1067357.png",
         "embeds": [
             {
                 "title": "🚀 New Pro License Payment Submitted!",
-                "color": 3066993,  # Зеленый цвет акцента
+                "color": 3066993,
                 "fields": [
                     {
                         "name": "📧 Customer Email",
@@ -70,17 +73,14 @@ class AuditRequest(BaseModel):
 def is_valid_pro_key(user_key: str) -> bool:
     clean_key = user_key.strip()
     
-    # Твой личный супер-ключ для тестов (всегда работает)
     if clean_key == "PRO_PREMIUM_TOKEN_2026":
         return True
         
-    # Проверка структуры индивидуального ключа (формат: email-хэш)
     if "-" not in clean_key:
         return False
         
     try:
         user_email, token_hash = clean_key.split("-", 1)
-        # Математически воссоздаем хэш на сервере для проверки подлинности
         expected_raw = f"{user_email.lower().strip()}:{SECRET_SIGNING_SALT}"
         expected_hash = hashlib.sha256(expected_raw.encode()).hexdigest()[:16]
         
@@ -101,7 +101,6 @@ async def submit_payment(email: str = Form(...), txid: str = Form(...)):
             content={"status": "error", "message": "Email and TxID are required."}
         )
 
-    # Отправка мгновенного уведомления в Discord
     sent = send_discord_alert(email, txid)
     
     return JSONResponse(content={
@@ -122,7 +121,6 @@ async def execute_audit(data: AuditRequest):
         }
     
     try:
-        # Базовый разбор кода (Доступен в Demo-версии)
         tree = ast.parse(source_code)
         raw_lines = source_code.splitlines()
         lines_count = len(raw_lines)
@@ -139,7 +137,6 @@ async def execute_audit(data: AuditRequest):
             "message": "Basic structural audit completed successfully. Syntax is valid, no compilation errors found."
         }
         
-        # ПРОВЕРКА ЛИЦЕНЗИИ ДЛЯ АКТИВАЦИИ PREMIUM ФИЧ
         if is_valid_pro_key(user_key):
             comment_density = round((comment_lines / lines_count) * 100) if lines_count > 0 else 0
             
@@ -147,7 +144,6 @@ async def execute_audit(data: AuditRequest):
             has_hardcoded_secrets = False
             has_unsafe_execution = False
             
-            # Сканирование безопасности
             for index, line in enumerate(raw_lines, 1):
                 lowered_line = line.lower()
                 if any(sec in lowered_line for sec in ["secret", "password", "passwd", "token"]) and "=" in line:
@@ -158,14 +154,12 @@ async def execute_audit(data: AuditRequest):
                     detected_issues.append(f"Line {index}: Insecure environment command execution context.")
                     has_unsafe_execution = True
 
-            # Калькулятор стоимости технического долга ($)
             base_debt = lines_count * 0.5 
             security_penalty = len(detected_issues) * 120.0
             structural_penalty = 75.0 if (lines_count > 25 and len(functions) <= 1) else 0.0
             total_debt_usd = round(base_debt + security_penalty + structural_penalty, 2)
             hours_estimated = round(total_debt_usd / 45, 1) if total_debt_usd > 0 else 0.2
 
-            # Generator для интерактивного графа зависимостей
             visual_nodes = [{"name": "App Root", "type": "root", "status": "secure" if not detected_issues else "unsecure"}]
             for cls in classes:
                 visual_nodes.append({"name": f"class {cls}", "type": "class", "status": "secure"})
@@ -348,7 +342,6 @@ async def get_application_interface():
     </div>
 </div>
 
-<!-- Payment Modal with Discord Webhook Integration -->
 <div id="paymentModal" class="modal">
     <div class="modal-content">
         <span class="close-btn" onclick="closePaymentModal()">&times;</span>
@@ -360,7 +353,6 @@ async def get_application_interface():
             <div style="font-size: 12px; color: var(--text-muted); text-align: center;">Transfer exactly <strong>19 USDT</strong> directly to the secure network node below:</div>
             <div class="crypto-address">TWcaHG75Sv5ssvdTU1Am6rPw5DRtoJB1hi</div>
             
-            <!-- Payment Form -->
             <form id="paymentForm" onsubmit="submitPaymentForm(event)" style="margin-top: 20px;">
                 <div style="margin-bottom: 12px;">
                     <label style="font-size: 12px; color: var(--text-muted);">Your Email Address:</label>
