@@ -132,26 +132,26 @@ async def analyze_code(req: AuditRequest):
     is_pro = False
     user_email = "Free User"
 
-    if pro_key and pro_key == OWNER_MASTER_KEY:
-        is_owner = True
-        is_pro = True
-        user_email = "OWNER (Administrator)"
-    elif pro_key:
-        valid, email_or_err = validate_pro_key(pro_key)
-        if not valid:
-            raise HTTPException(status_code=400, detail=f"Key error: {email_or_err}")
-        
-        devices = load_json(DEVICES_FILE)
-        if pro_key in devices:
-            if devices[pro_key] != device_id:
-                raise HTTPException(status_code=403, detail="⛔ Anti-Leak Protection: Key bound to another device!")
+    # 1. Мягкая проверка ключа: если ключ пустой — НЕ выбиваем ошибку
+    if pro_key:
+        if pro_key == OWNER_MASTER_KEY:
+            is_owner = True
+            is_pro = True
+            user_email = "OWNER (Administrator)"
         else:
-            devices[pro_key] = device_id
-            save_json(DEVICES_FILE, devices)
-        
-        is_pro = True
-        user_email = email_or_err
+            valid, email_or_err = validate_pro_key(pro_key)
+            if valid:
+                devices = load_json(DEVICES_FILE)
+                if pro_key in devices and devices[pro_key] != device_id:
+                    raise HTTPException(status_code=403, detail="⛔ Anti-Leak Protection: Key bound to another device!")
+                elif pro_key not in devices:
+                    devices[pro_key] = device_id
+                    save_json(DEVICES_FILE, devices)
+                
+                is_pro = True
+                user_email = email_or_err
 
+    # 2. Сканирование кода
     findings = []
     lines = code.split("\n")
     
@@ -164,11 +164,11 @@ async def analyze_code(req: AuditRequest):
             if "=" in line and not line.strip().startswith("#"):
                 findings.append({"line": idx, "type": "MEDIUM", "msg": "Exposed API Key or plaintext secret detected"})
 
+    # 3. Пейволл: Ограничение бесплатной версии
+    hidden_count = 0
     if not is_pro and len(findings) > 1:
         hidden_count = len(findings) - 1
-        findings = findings[:1]
-    else:
-        hidden_count = 0
+        findings = findings[:1]  # Оставляем строго 1 уязвимость для бесплатной версии
 
     return {
         "status": "success",
@@ -199,14 +199,14 @@ HTML_TEMPLATE = """
             <h1 class="text-3xl font-extrabold text-emerald-400 tracking-tight mb-1">🛡️ CodeInsight SaaS</h1>
             <p class="text-xs text-emerald-500/70 font-mono tracking-wider uppercase">Autonomous Anti-Leak Vulnerability Scanner</p>
             <div class="mt-4">
-                <span id="statusBadge" class="px-4 py-1.5 bg-slate-800 text-slate-400 border border-slate-700 rounded-full text-xs font-bold uppercase tracking-wider">FREE Plan</span>
+                <span id="statusBadge" class="px-4 py-1.5 bg-slate-800 text-slate-400 border border-slate-700 rounded-full text-xs font-bold uppercase tracking-wider">FREE PLAN</span>
             </div>
         </div>
 
         <div class="mb-6 bg-slate-950/60 p-5 rounded-xl border border-emerald-500/10 text-left">
-            <label class="block text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">🔑 Your Pro / Owner Key:</label>
+            <label class="block text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">🔑 PRO / OWNER KEY (OPTIONAL):</label>
             <div class="flex flex-col sm:flex-row gap-2">
-                <input type="password" id="proKeyInput" placeholder="Enter Pro Key or Master Password" 
+                <input type="password" id="proKeyInput" placeholder="Leave empty for Free plan or enter key" 
                        class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-center sm:text-left focus:outline-none focus:border-emerald-500 transition">
                 <button onclick="saveKey()" class="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm transition shadow-lg shadow-emerald-900/20">
                     Activate
@@ -233,6 +233,7 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
+    <!-- Payment Modal -->
     <div id="paymentModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden p-4 z-50">
         <div class="bg-slate-900 border border-emerald-500/30 rounded-2xl max-w-md w-full p-6 shadow-2xl text-center relative">
             <button onclick="closePaymentModal()" class="absolute top-4 right-4 text-slate-500 hover:text-white transition">✕</button>
@@ -242,12 +243,12 @@ HTML_TEMPLATE = """
             <div class="bg-slate-950 p-4 rounded-xl mb-5 text-center border border-emerald-500/10">
                 <p class="text-xs text-slate-400 mb-2">Send exactly <strong class="text-emerald-400">$9.99 USDT</strong> to:</p>
                 <p class="text-xs font-mono font-bold text-emerald-300 bg-slate-900 py-2 px-3 rounded-lg select-all break-all border border-slate-800">{{OWNER_USDT_ADDRESS}}</p>
-                <p class="text-[10px] text-amber-500/90 mt-2">⚠️ If sending from an exchange, make sure to cover network fees. Exactly $9.99 must arrive!</p>
+                <p class="text-[10px] text-amber-500/90 mt-2">⚠️ Make sure to cover network fees. Exactly $9.99 must arrive!</p>
             </div>
 
             <div class="space-y-4 text-left">
                 <div>
-                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Your Email (for key generation):</label>
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Your Email:</label>
                     <input type="email" id="payEmail" placeholder="your@email.com" class="w-full bg-slate-950 border border-slate-750 rounded-lg p-2.5 text-sm focus:outline-none focus:border-emerald-500">
                 </div>
                 <div>
@@ -274,8 +275,8 @@ HTML_TEMPLATE = """
         function saveKey() {
             const key = document.getElementById('proKeyInput').value.trim();
             localStorage.setItem('pro_key', key);
-            alert('Key saved locally!');
             updateBadge();
+            if(key) alert('Key saved locally!');
         }
 
         function updateBadge() {
@@ -286,7 +287,7 @@ HTML_TEMPLATE = """
                 badge.innerText = 'PRO / KEY ACTIVE';
                 badge.className = 'px-4 py-1.5 bg-emerald-950/40 text-emerald-400 border border-emerald-500/40 rounded-full text-xs font-bold uppercase tracking-wider';
             } else {
-                badge.innerText = 'FREE Plan';
+                badge.innerText = 'FREE PLAN';
                 badge.className = 'px-4 py-1.5 bg-slate-800 text-slate-400 border border-slate-700 rounded-full text-xs font-bold uppercase tracking-wider';
             }
         }
@@ -342,7 +343,14 @@ HTML_TEMPLATE = """
                 });
                 const data = await res.json();
 
-                if (!res.ok) return alert('Error: ' + (data.detail || 'Server error'));
+                if (!res.ok) {
+                    // Если ключ неверный — очищаем его, чтобы не мешал
+                    if(res.status === 400 && data.detail.includes("Key error")) {
+                        localStorage.removeItem('pro_key');
+                        updateBadge();
+                    }
+                    return alert('Error: ' + (data.detail || 'Server error'));
+                }
 
                 const resultsDiv = document.getElementById('results');
                 const findingsList = document.getElementById('findingsList');
@@ -362,10 +370,15 @@ HTML_TEMPLATE = """
                     });
                 }
 
+                // ПЕЙВОЛЛ БАННЕР ДЛЯ БЕСПЛАТНЫХ ПОЛЬЗОВАТЕЛЕЙ
                 if (data.hidden_findings_count > 0) {
                     findingsList.innerHTML += `
-                        <div class="p-4 bg-amber-950/30 border border-amber-500/20 rounded-xl text-xs text-amber-400 mt-2 font-medium">
-                            🔒 Bound protection: ${data.hidden_findings_count} more vulnerabilities found. Activate your PRO key to unhide the full report!
+                        <div class="p-5 bg-gradient-to-r from-emerald-950/60 to-slate-900 border border-emerald-500/40 rounded-xl text-center mt-4 shadow-xl">
+                            <p class="text-sm font-bold text-emerald-400 mb-1">🔒 LOCKED CONTENT (${data.hidden_findings_count} MORE RISKS DETECTED)</p>
+                            <p class="text-xs text-slate-300 mb-3">Free version shows only the first vulnerability. Upgrade to PRO to view all security threats!</p>
+                            <button onclick="openPaymentModal()" class="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold px-6 py-2 rounded-lg text-xs uppercase transition shadow-lg">
+                                Unlock Full Report ($9.99)
+                            </button>
                         </div>
                     `;
                 }
