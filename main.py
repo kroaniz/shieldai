@@ -1,488 +1,415 @@
-import ast
-import hashlib
 import os
-import requests
-from fastapi import FastAPI, Form
-from fastapi.responses import HTMLResponse, JSONResponse
+import json
+import time
+import hashlib
+import httpx
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="CodeInsight Enterprise Pro Platform")
-
-# СЕКРЕТНЫЙ КЛЮЧ-СОЛЬ. Используется для генерации уникальных лицензий.
-SECRET_SIGNING_SALT = "GLOBAL_CODEINSIGHT_SECURE_TOKEN_2026_PRO"
-
+app = FastAPI(title="CodeInsight Anti-Leak SaaS")
 
 # ==========================================
-# 1. УВЕДОМЛЕНИЯ В DISCORD (WEBHOOK)
+# ⚙️ НАСТРОЙКИ И ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
 # ==========================================
+OWNER_USDT_ADDRESS = os.getenv("OWNER_USDT_ADDRESS", "TYourTronUSDTAddressHere")
+OWNER_MASTER_KEY = os.getenv("OWNER_MASTER_KEY", "SUPER_SECRET_OWNER_KEY_123")
+SECRET_SIGNING_SALT = os.getenv("SECRET_SIGNING_SALT", "MY_SUPER_SALT_99")
 
-def send_discord_alert(email: str, txid: str) -> bool:
-    # Автоматически берет переменную с Render или использует твой URL по умолчанию
-    webhook_url = os.getenv(
-        "DISCORD_WEBHOOK_URL",
-        "https://discord.com/api/webhooks/1529532713328054274/MhjeBaa1OAskAN5HdnsOKAHJFHrr0v5CV0JEv26J1jY4ny5N5Z5LcDV1MO_dcvpvEnE8"
-    )
+DEVICES_FILE = "registered_devices.json"
+TX_FILE = "used_transactions.json"
+
+# ==========================================
+# 📂 ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ХРАНЕНИЯ
+# ==========================================
+def load_json(filename: str) -> dict:
+    if os.path.exists(filename):
+        try:
+            with open(filename, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_json(filename: str, data: dict):
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+# ==========================================
+# 🔑 ГЕНЕРАЦИЯ И ВАЛИДАЦИЯ КЛЮЧЕЙ
+# ==========================================
+def generate_pro_key(email: str) -> str:
+    clean_email = email.lower().strip()
+    expires_ts = int(time.time()) + (3650 * 86400) # Ключ на 10 лет
+    raw_string = f"{clean_email}:{expires_ts}:{SECRET_SIGNING_SALT}"
+    key_hash = hashlib.sha256(raw_string.encode()).hexdigest()[:16]
+    return f"{clean_email}:{expires_ts}:{key_hash}"
+
+def validate_pro_key(key: str) -> tuple[bool, str]:
+    if not key:
+        return False, "Ключ не предоставлен"
     
-    if not webhook_url:
-        print("[WARNING] DISCORD_WEBHOOK_URL environment variable is missing.")
-        return False
-
-    # Форматирование карт-уведомления (Embed)
-    payload = {
-        "username": "CodeInsight Payment Alert",
-        "avatar_url": "https://cdn-icons-png.flaticon.com/512/1067/1067357.png",
-        "embeds": [
-            {
-                "title": "🚀 New Pro License Payment Submitted!",
-                "color": 3066993,
-                "fields": [
-                    {
-                        "name": "📧 Customer Email",
-                        "value": f"`{email}`",
-                        "inline": True
-                    },
-                    {
-                        "name": "🔗 Transaction ID (TxID)",
-                        "value": f"`{txid}`",
-                        "inline": False
-                    }
-                ],
-                "footer": {
-                    "text": "CodeInsight Enterprise Platform // Verification Node"
-                }
-            }
-        ]
-    }
-
+    parts = key.split(":")
+    if len(parts) != 3:
+        return False, "Неверный формат ключа"
+    
+    email, expires_str, key_hash = parts
     try:
-        response = requests.post(webhook_url, json=payload, timeout=5)
-        return response.status_code in [200, 204]
-    except Exception as e:
-        print(f"[ERROR] Failed to send Discord notification: {e}")
-        return False
-
+        expires_ts = int(expires_str)
+    except ValueError:
+        return False, "Неверный формат даты в ключе"
+    
+    if expires_ts < int(time.time()):
+        return False, "Срок действия ключа истек"
+    
+    raw_string = f"{email}:{expires_ts}:{SECRET_SIGNING_SALT}"
+    expected_hash = hashlib.sha256(raw_string.encode()).hexdigest()[:16]
+    
+    if key_hash != expected_hash:
+        return False, "Подпись ключа недействительна"
+    
+    return True, email
 
 # ==========================================
-# 2. МОДЕЛИ И ЛОГИКА ЛИЦЕНЗИРОВАНИЯ
+# 📦 МОДЕЛИ ЗАПРОСОВ (PYDANTIC)
 # ==========================================
+class PaymentVerificationRequest(BaseModel):
+    tx_hash: str
+    email: str
+    device_id: str
 
 class AuditRequest(BaseModel):
     code: str
-    license_key: str = ""
+    pro_key: str = ""
+    device_id: str
 
-def is_valid_pro_key(user_key: str) -> bool:
-    clean_key = user_key.strip()
+# ==========================================
+# 🚀 API ЭНДПОИНТЫ
+# ==========================================
+
+@app.post("/api/verify-direct-payment")
+async def verify_payment(req: PaymentVerificationRequest):
+    tx_hash = req.tx_hash.strip()
+    email = req.email.strip()
+    device_id = req.device_id.strip()
+
+    if not tx_hash or not email or not device_id:
+        raise HTTPException(status_code=400, detail="Заполните все поля")
+
+    # 1. Проверка на повторный ввод хэша
+    used_txs = load_json(TX_FILE)
+    if tx_hash in used_txs:
+        raise HTTPException(status_code=400, detail="Этот хэш транзакции уже был использован!")
+
+    # 2. Запрос к TronScan API с маскировкой под браузер (User-Agent)
+    url = f"https://apilist.tronscanapi.com/api/transaction-info?hash={tx_hash}"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     
-    if clean_key == "PRO_PREMIUM_TOKEN_2026":
-        return True
-        
-    if "-" not in clean_key:
-        return False
-        
-    try:
-        user_email, token_hash = clean_key.split("-", 1)
-        expected_raw = f"{user_email.lower().strip()}:{SECRET_SIGNING_SALT}"
-        expected_hash = hashlib.sha256(expected_raw.encode()).hexdigest()[:16]
-        
-        return token_hash == expected_hash
-    except Exception:
-        return False
+    async with httpx.AsyncClient(timeout=12.0) as client:
+        try:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=400, detail="Не удалось связаться с нодой TRON")
+            data = resp.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Ошибка сети при проверке транзакции")
 
+    # 3. Валидация перевода USDT
+    trc20_transfers = data.get("trc20TransferInfo", [])
+    valid_payment_found = False
 
-# ==========================================
-# 3. API ЭНДПОИНТЫ
-# ==========================================
+    for transfer in trc20_transfers:
+        recipient = transfer.get("to_address", "")
+        amount_str = transfer.get("amount_str", "0")
+        symbol = transfer.get("symbol", "")
 
-@app.post("/api/submit-payment")
-async def submit_payment(email: str = Form(...), txid: str = Form(...)):
-    if not email.strip() or not txid.strip():
-        return JSONResponse(
+        amount_usdt = float(amount_str) / 1000000.0
+
+        if recipient == OWNER_USDT_ADDRESS and amount_usdt >= 8.90 and symbol.upper() == "USDT":
+            valid_payment_found = True
+            break
+
+    if not valid_payment_found:
+        raise HTTPException(
             status_code=400, 
-            content={"status": "error", "message": "Email and TxID are required."}
+            detail=f"Транзакция не найдена или сумма меньше $9.99 USDT (Адрес получателя: {OWNER_USDT_ADDRESS})"
         )
 
-    sent = send_discord_alert(email, txid)
-    
-    return JSONResponse(content={
-        "status": "success", 
-        "message": "Payment details submitted successfully! License key will be emailed after blockchain verification."
-    })
+    # 4. Фиксация транзакции
+    used_txs[tx_hash] = {"email": email, "time": int(time.time()), "device_id": device_id}
+    save_json(TX_FILE, used_txs)
+
+    # 5. Выдача ключа и привязка к Device ID
+    new_key = generate_pro_key(email)
+    devices = load_json(DEVICES_FILE)
+    devices[new_key] = device_id
+    save_json(DEVICES_FILE, devices)
+
+    return {"status": "success", "pro_key": new_key, "message": "Оплата успешно подтверждена!"}
 
 
-@app.post("/api/v1/audit")
-async def execute_audit(data: AuditRequest):
-    source_code = data.code
-    user_key = data.license_key.strip()
-    
-    if not source_code.strip():
-        return {
-            "status": "empty",
-            "message": "Input data is missing. Please paste your source code to proceed."
-        }
-    
-    try:
-        tree = ast.parse(source_code)
-        raw_lines = source_code.splitlines()
-        lines_count = len(raw_lines)
+@app.post("/api/analyze")
+async def analyze_code(req: AuditRequest):
+    code = req.code
+    pro_key = req.pro_key.strip()
+    device_id = req.device_id.strip()
+
+    is_owner = False
+    is_pro = False
+    user_email = "Free User"
+
+    if pro_key and pro_key == OWNER_MASTER_KEY:
+        is_owner = True
+        is_pro = True
+        user_email = "OWNER (Администратор)"
+    elif pro_key:
+        valid, email_or_err = validate_pro_key(pro_key)
+        if not valid:
+            raise HTTPException(status_code=400, detail=f"Ошибка ключа: {email_or_err}")
         
-        functions = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
-        classes = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
-        comment_lines = sum(1 for line in raw_lines if line.strip().startswith("#"))
-                
-        response_data = {
-            "status": "demo_success",
-            "lines": lines_count,
-            "functions_count": len(functions),
-            "classes_count": len(classes),
-            "message": "Basic structural audit completed successfully. Syntax is valid, no compilation errors found."
-        }
-        
-        if is_valid_pro_key(user_key):
-            comment_density = round((comment_lines / lines_count) * 100) if lines_count > 0 else 0
-            
-            detected_issues = []
-            has_hardcoded_secrets = False
-            has_unsafe_execution = False
-            
-            for index, line in enumerate(raw_lines, 1):
-                lowered_line = line.lower()
-                if any(sec in lowered_line for sec in ["secret", "password", "passwd", "token"]) and "=" in line:
-                    if not any(safe in lowered_line for safe in ["env", "get", "load"]):
-                        detected_issues.append(f"Line {index}: Potential hardcoded credential token.")
-                        has_hardcoded_secrets = True
-                if "os.system(" in line or "eval(" in line or "exec(" in line:
-                    detected_issues.append(f"Line {index}: Insecure environment command execution context.")
-                    has_unsafe_execution = True
-
-            base_debt = lines_count * 0.5 
-            security_penalty = len(detected_issues) * 120.0
-            structural_penalty = 75.0 if (lines_count > 25 and len(functions) <= 1) else 0.0
-            total_debt_usd = round(base_debt + security_penalty + structural_penalty, 2)
-            hours_estimated = round(total_debt_usd / 45, 1) if total_debt_usd > 0 else 0.2
-
-            visual_nodes = [{"name": "App Root", "type": "root", "status": "secure" if not detected_issues else "unsecure"}]
-            for cls in classes:
-                visual_nodes.append({"name": f"class {cls}", "type": "class", "status": "secure"})
-            for func in functions:
-                func_status = "secure"
-                if has_unsafe_execution and func in source_code:
-                    func_status = "unsecure"
-                visual_nodes.append({"name": f"def {func}()", "type": "function", "status": func_status})
-
-            if detected_issues:
-                issue_list_str = "\n".join([f"- {issue}" for issue in detected_issues])
-                
-                patch_advice = f"""### ⚠️ CRITICAL INFRASTRUCTURE RISKS DETECTED:
-{issue_list_str}
-
-### 🛡️ AUTOMATED REMEDIATION PATCH:
-```python
-# [FIXED] Security Hardening Patch Applied Successfully
-import subprocess
-import shlex
-import os
-
-def secure_execute(command_string):
-    safe_args = shlex.split(command_string)
-    return subprocess.run(safe_args, capture_output=True, text=True, check=True)
-
-# Loaded system credentials from secure environment space
-db_password = os.getenv('ENTERPRISE_VAULT_DB_PASS')
-```"""
-                maintainability = "Critical Risk"
-                security_status = "unsecure"
-            else:
-                if lines_count > 25 and len(functions) <= 1:
-                    patch_advice = "### 📊 ARCHITECTURE ANALYSIS:\nYour script contains a monolithic code structure. Pro Recommendation: Break down your main execution pipeline into distinct modular sub-functions."
-                    maintainability = "Fair"
-                else:
-                    patch_advice = "### ✨ ARCHITECTURE STANDARDS COMPLIANT:\nCode syntax density, scope isolation, and function-to-line parameters are perfectly optimized."
-                    maintainability = "Excellent"
-                security_status = "secure"
-
-            response_data["status"] = "pro_success"
-            response_data["message"] = "PRO Mode successfully activated. Comprehensive compliance metrics compiled."
-            response_data["advanced_metrics"] = {
-                "maintainability": maintainability,
-                "comment_density": f"{comment_density}%",
-                "security_status": security_status,
-                "tech_debt_usd": f"${total_debt_usd}",
-                "remediation_time": f"{hours_estimated} hrs",
-                "visual_nodes": visual_nodes,
-                "remediation_patch": patch_advice
-            }
+        devices = load_json(DEVICES_FILE)
+        if pro_key in devices:
+            if devices[pro_key] != device_id:
+                raise HTTPException(
+                    status_code=403, 
+                    detail="⛔ Защита от слива: Этот ключ привязан к другому устройству!"
+                )
         else:
-            if user_key:
-                response_data["message"] = "Invalid or expired Pro License Key. Running in standard Demo Mode."
+            devices[pro_key] = device_id
+            save_json(DEVICES_FILE, devices)
+        
+        is_pro = True
+        user_email = email_or_err
 
-        return response_data
+    findings = []
+    lines = code.split("\n")
+    
+    for idx, line in enumerate(lines, 1):
+        if "eval(" in line or "exec(" in line:
+            findings.append({"line": idx, "type": "CRITICAL", "msg": "Опасное выполнение динамического кода (eval/exec)"})
+        if "SELECT " in line.upper() and "+" in line:
+            findings.append({"line": idx, "type": "HIGH", "msg": "Возможная SQL-инъекция через конкатенацию строк"})
+        if "api_key" in line.lower() or "secret" in line.lower():
+            if "=" in line and not line.strip().startswith("#"):
+                findings.append({"line": idx, "type": "MEDIUM", "msg": "Обнаружен открытый API ключ или секрет в коде"})
 
-    except SyntaxError as e:
-        return {
-            "status": "syntax_error",
-            "message": f"Critical syntax defect identified on line {e.lineno}: {e.msg}"
-        }
+    if not is_pro and len(findings) > 1:
+        hidden_count = len(findings) - 1
+        findings = findings[:1]
+    else:
+        hidden_count = 0
 
+    return {
+        "status": "success",
+        "user_status": "OWNER" if is_owner else ("PRO" if is_pro else "FREE"),
+        "user_email": user_email,
+        "total_lines_analyzed": len(lines),
+        "findings": findings,
+        "hidden_findings_count": hidden_count,
+        "is_pro": is_pro
+    }
 
 # ==========================================
-# 4. ВЕБ-ИНТЕРФЕЙС (HTML / JS / CSS)
+# 🖥️ ВЕБ-ИНТЕРФЕЙС (HTML ШАБЛОН)
 # ==========================================
-
-@app.get("/", response_class=HTMLResponse)
-async def get_application_interface():
-    html_content = """<!DOCTYPE html>
-<html lang="en">
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CodeInsight // Enterprise Code Audit Platform</title>
+    <title>CodeInsight — Автономный Аудит Безопасности</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        :root {
-            --bg-dark: #0d1117;
-            --panel-dark: #161b22;
-            --border-color: #30363d;
-            --text-main: #c9d1d9;
-            --text-muted: #8b949e;
-            --btn-green: #238636;
-            --btn-green-hover: #2ea043;
-            --btn-blue: #1f6feb;
-            --btn-blue-hover: #388bfd;
-            --accent-gold: #d29922;
-            --danger-red: #f85149;
-        }
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; background-color: var(--bg-dark); color: var(--text-main); margin: 0; padding: 40px 20px; }
-        .container { max-width: 850px; background-color: var(--panel-dark); border: 1px solid var(--border-color); border-radius: 12px; padding: 40px; margin: 0 auto; box-shadow: 0 8px 24px rgba(0,0,0,0.6); }
-        h1 { color: #fff; text-align: center; margin-top: 0; font-weight: 600; }
-        p.desc { text-align: center; color: var(--text-muted); margin-bottom: 30px; font-size: 14px; }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 8px; color: #fff; font-size: 14px; font-weight: 500; }
-        textarea { width: 100%; height: 180px; background-color: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-main); padding: 14px; border-radius: 6px; box-sizing: border-box; font-family: monospace; font-size: 14px; resize: vertical; }
-        input[type="text"], input[type="email"] { width: 100%; padding: 12px; background-color: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-main); border-radius: 6px; box-sizing: border-box; font-family: monospace; }
-        .actions { display: grid; grid-template-columns: 1fr; gap: 15px; margin-top: 15px; }
-        button { padding: 15px; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; color: #fff; transition: background-color 0.2s; }
-        .btn-audit { background-color: var(--btn-green); }
-        .btn-audit:hover { background-color: var(--btn-green-hover); }
-        .btn-pay { background-color: var(--btn-blue); font-size: 14px; padding: 12px 24px; margin-top: 15px; display: inline-block; text-decoration: none; color: #fff; border-radius: 6px; font-weight: bold; cursor: pointer; }
-        .btn-pay:hover { background-color: var(--btn-blue-hover); }
-        .dashboard { margin-top: 30px; padding: 25px; background-color: #1f242c; border-radius: 8px; border-left: 4px solid var(--btn-blue); display: none; }
-        .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 20px 0; }
-        .card { background-color: var(--bg-dark); border: 1px solid var(--border-color); padding: 15px; border-radius: 6px; text-align: center; }
-        .card-num { font-size: 22px; font-weight: bold; color: #fff; }
-        .card-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; margin-top: 4px; }
-        .pro-banner { background-color: rgba(210, 153, 34, 0.1); border: 1px solid var(--accent-gold); padding: 20px; border-radius: 8px; margin-top: 20px; text-align: center; }
-        .pro-unlocked { background-color: rgba(35, 134, 54, 0.1); border: 1px solid var(--btn-green); padding: 20px; border-radius: 8px; margin-top: 20px; display: none; }
-        .map-container { background: #0d1117; border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; margin-top: 20px; text-align: center; }
-        .map-title { font-size: 13px; font-weight: bold; color: #fff; margin-bottom: 15px; text-align: left; text-transform: uppercase;}
-        .node-flow { display: block; text-align: center; padding: 10px; }
-        .node { display: inline-block; padding: 8px 16px; border-radius: 20px; font-size: 12px; font-family: monospace; font-weight: bold; margin: 5px; border: 1px solid var(--border-color); background: var(--panel-dark); }
-        .node-root { border-color: #58a6ff; color: #58a6ff; box-shadow: 0 0 10px rgba(88,166,255,0.2); }
-        .node-secure { border-color: #2ea043; color: #56d364; box-shadow: 0 0 10px rgba(46,160,67,0.2); }
-        .node-unsecure { border-color: var(--danger-red); color: var(--danger-red); box-shadow: 0 0 15px rgba(248,81,73,0.4); animation: pulse 2s infinite; }
-        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.03); } 100% { transform: scale(1); } }
-        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8); backdrop-filter: blur(4px); }
-        .modal-content { background-color: var(--panel-dark); margin: 8% auto; padding: 30px; border: 1px solid var(--border-color); width: 90%; max-width: 500px; border-radius: 12px; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.7); }
-        .close-btn { position: absolute; right: 20px; top: 15px; color: var(--text-muted); font-size: 24px; font-weight: bold; cursor: pointer; }
-        .close-btn:hover { color: #fff; }
-        .payment-option { background: var(--bg-dark); border: 1px solid var(--border-color); padding: 20px; border-radius: 8px; margin-top: 15px; text-align: left; }
-        .crypto-address { background: #0d1117; border: 1px solid #21262d; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; color: #58a6ff; word-break: break-all; margin-top: 8px; text-align: center; letter-spacing: 0.5px; }
+        body { background-color: #0f172a; color: #f8fafc; }
     </style>
 </head>
-<body>
-
-<div class="container">
-    <h1>CodeInsight Platform</h1>
-    <p class="desc">Enterprise-Grade Static Code Structure & Risk Valuation Engine</p>
-    
-    <div class="form-group">
-        <label>Pro License Access Token (Leave empty for Standard Evaluation Mode)</label>
-        <input type="text" id="licenseKey" placeholder="Paste your enterprise license key here...">
-    </div>
-
-    <div class="form-group">
-        <label>Target Python Source Code Pipeline</label>
-        <textarea id="codeBody" placeholder="def process_payload(data):\n    return data"></textarea>
-    </div>
-    
-    <div class="actions">
-        <button class="btn-audit" onclick="requestAnalysis()">Execute Core Infrastructure Scan</button>
-    </div>
-
-    <div id="dashBlock" class="dashboard">
-        <h3 style="margin-top: 0; color: #fff;">Audit Framework Matrix:</h3>
-        <p id="statusMsg"></p>
-        
-        <div id="baseMetrics" class="metrics">
-            <div class="card"><div id="mLines" class="card-num">0</div><div class="card-label">Lines Evaluated</div></div>
-            <div class="card"><div id="mFuncs" class="card-num">0</div><div class="card-label">Isolated Functions</div></div>
-            <div class="card"><div id="mClasses" class="card-num">0</div><div class="card-label">Class Declarations</div></div>
+<body class="min-h-screen flex flex-col items-center justify-center p-4">
+    <div class="max-w-4xl w-full bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-2xl">
+        <div class="flex justify-between items-center border-b border-slate-700 pb-4 mb-6">
+            <div>
+                <h1 class="text-2xl font-bold text-indigo-400">🛡️ CodeInsight SaaS</h1>
+                <p class="text-xs text-slate-400">Автономный анти-лик сканер уязвимостей</p>
+            </div>
+            <div class="text-right">
+                <span id="statusBadge" class="px-3 py-1 bg-slate-700 text-slate-300 rounded-full text-xs font-semibold">FREE Plan</span>
+            </div>
         </div>
 
-        <div id="proBanner" class="pro-banner">
-            <h4 style="margin-top: 0; color: var(--accent-gold);">🔒 Enterprise Intelligence Logs Locked</h4>
-            <p style="font-size: 13px; margin-bottom: 0;">Automated remediation scripts, real-time micro-architecture dependency graph mapping, and financial technical debt metrics require active authorization.</p>
-            <button class="btn-pay" onclick="openPaymentModal()">⚡ Unlock Pro Architecture Pack ($19)</button>
-        </div>
-
-        <div id="proUnlocked" class="pro-unlocked">
-            <h4 style="margin-top: 0; color: #7ee787;">⚡ Pro Infrastructure Environment Fully Activated</h4>
-            <div class="metrics" style="margin-bottom: 20px;">
-                <div class="card" id="cardMaintain" style="border-color: #238636;"><div id="mMaintain" class="card-num" style="color: #7ee787;">N/A</div><div class="card-label">Maintainability Rating</div></div>
-                <div class="card" style="border-color: #238636;"><div id="mComments" class="card-num" style="color: #7ee787;">0%</div><div class="card-label">Documentation Volume</div></div>
-            </div>
-            <div class="metrics" style="margin-bottom: 20px;">
-                <div class="card" id="cardDebt" style="border-color: #30363d;"><div id="mDebt" class="card-num" style="color: #58a6ff;">$0.00</div><div class="card-label">Technical Debt Liability</div></div>
-                <div class="card" style="border-color: #30363d;"><div id="mTime" class="card-num" style="color: #58a6ff;">0.0 hrs</div><div class="card-label">Remediation Effort</div></div>
-            </div>
-            <div class="map-container">
-                <div class="map-title">🌐 Active Micro-Architecture Dependency Graph:</div>
-                <div id="mapFlow" class="node-flow"></div>
-            </div>
-            <pre id="proPatchText" style="white-space: pre-wrap; font-family: monospace; text-align: left; font-size: 13px; color: #7ee787; background: #0d1117; padding: 15px; border-radius: 6px; border: 1px solid #30363d; margin-top: 20px;"></pre>
-        </div>
-    </div>
-</div>
-
-<div id="paymentModal" class="modal">
-    <div class="modal-content">
-        <span class="close-btn" onclick="closePaymentModal()">&times;</span>
-        <h3 style="margin-top: 0; color: #fff; text-align: center;">Authorize Pro License</h3>
-        <p style="font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 20px;">Deploy fully-automated vulnerability architecture checking and mitigation code snippets.</p>
-        
-        <div class="payment-option">
-            <div style="font-weight: 600; font-size: 14px; color: #7ee787; text-align: center; margin-bottom: 10px;">Method: Digital Asset Settlement (USDT TRC-20)</div>
-            <div style="font-size: 12px; color: var(--text-muted); text-align: center;">Transfer exactly <strong>19 USDT</strong> directly to the secure network node below:</div>
-            <div class="crypto-address">TWcaHG75Sv5ssvdTU1Am6rPw5DRtoJB1hi</div>
-            
-            <form id="paymentForm" onsubmit="submitPaymentForm(event)" style="margin-top: 20px;">
-                <div style="margin-bottom: 12px;">
-                    <label style="font-size: 12px; color: var(--text-muted);">Your Email Address:</label>
-                    <input type="email" id="payEmail" required placeholder="dev@company.com" style="margin-top: 4px;">
-                </div>
-                <div style="margin-bottom: 16px;">
-                    <label style="font-size: 12px; color: var(--text-muted);">Transaction Hash (TxID):</label>
-                    <input type="text" id="payTxid" required placeholder="Paste TxID here..." style="margin-top: 4px;">
-                </div>
-                <button type="submit" id="paySubmitBtn" class="btn-pay" style="width: 100%; text-align: center; margin-top: 0; border: none;">
-                    Confirm Settlement & Submit TxID
+        <div class="mb-4 bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
+            <label class="block text-xs font-semibold text-slate-400 mb-1">🔑 Ваш Pro / Owner Ключ:</label>
+            <div class="flex gap-2">
+                <input type="password" id="proKeyInput" placeholder="Вставьте ключ или Master-пароль" 
+                       class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+                <button onclick="saveKey()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
+                    Сохранить
                 </button>
-            </form>
-            
-            <div id="payStatusMsg" style="font-size: 12px; text-align: center; margin-top: 12px; display: none; line-height: 1.4;"></div>
+                <button onclick="openPaymentModal()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
+                    Купить PRO ($9.99)
+                </button>
+            </div>
+        </div>
+
+        <div class="mb-4">
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Исходный код для аудита:</label>
+            <textarea id="codeArea" rows="8" placeholder="Вставьте ваш Python код здесь..." 
+                      class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm font-mono focus:outline-none focus:border-indigo-500"></textarea>
+        </div>
+
+        <button onclick="runAudit()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl font-bold text-base shadow-lg transition">
+            🔍 Запустить Безопасный Аудит
+        </button>
+
+        <div id="results" class="mt-6 hidden bg-slate-900 p-4 rounded-xl border border-slate-700">
+            <h3 class="text-sm font-bold text-slate-300 mb-2">Отчет аудита:</h3>
+            <div id="findingsList" class="space-y-2"></div>
         </div>
     </div>
-</div>
 
-<script>
-    function openPaymentModal() { document.getElementById("paymentModal").style.display = "block"; }
-    function closePaymentModal() { document.getElementById("paymentModal").style.display = "none"; }
-    window.onclick = function(event) { const modal = document.getElementById("paymentModal"); if (event.target == modal) { modal.style.display = "none"; } }
+    <div id="paymentModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden p-4">
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+            <button onclick="closePaymentModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white">✕</button>
+            <h2 class="text-xl font-bold text-emerald-400 mb-2">Оплата PRO через USDT (TRC-20)</h2>
+            <p class="text-xs text-slate-400 mb-4">Автономная активация без посредников за 10 секунд.</p>
 
-    async function submitPaymentForm(event) {
-        event.preventDefault();
-        const email = document.getElementById("payEmail").value;
-        const txid = document.getElementById("payTxid").value;
-        const btn = document.getElementById("paySubmitBtn");
-        const statusMsg = document.getElementById("payStatusMsg");
+            <div class="bg-slate-900 p-3 rounded-xl mb-4 text-center border border-slate-700">
+                <p class="text-xs text-slate-400 mb-1">Отправьте ровно <strong class="text-emerald-400">$9.99 USDT</strong> на адрес:</p>
+                <p class="text-xs font-mono font-bold text-slate-200 select-all break-all">{{OWNER_USDT_ADDRESS}}</p>
+                <p class="text-[10px] text-amber-400 mt-2">⚠️ При выводе с биржи учитывайте комиссию, на кошелек должно прийти не менее $9.99!</p>
+            </div>
 
-        btn.disabled = true;
-        btn.innerText = "Processing Notification...";
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Ваш Email (для генерации ключа):</label>
+                    <input type="email" id="payEmail" placeholder="your@email.com" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Хэш транзакции (TX Hash):</label>
+                    <input type="text" id="payTxHash" placeholder="Введите TX Hash из кошелька" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm">
+                </div>
+                <button onclick="verifyPayment()" id="payBtn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-bold text-sm transition">
+                    Проверить транзакцию
+                </button>
+            </div>
+        </div>
+    </div>
 
-        const formData = new FormData();
-        formData.append("email", email);
-        formData.append("txid", txid);
-
-        try {
-            const res = await fetch("/api/submit-payment", {
-                method: "POST",
-                body: formData
-            });
-            const result = await res.json();
-            
-            statusMsg.style.display = "block";
-            if (result.status === "success") {
-                statusMsg.style.color = "#7ee787";
-                statusMsg.innerText = "✅ " + result.message;
-                document.getElementById("paymentForm").reset();
-            } else {
-                statusMsg.style.color = "var(--danger-red)";
-                statusMsg.innerText = "❌ " + (result.message || "Failed to submit payment info.");
+    <script>
+        function getDeviceId() {
+            let devId = localStorage.getItem('device_id');
+            if (!devId) {
+                devId = 'dev_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+                localStorage.setItem('device_id', devId);
             }
-        } catch (e) {
-            statusMsg.style.display = "block";
-            statusMsg.style.color = "var(--danger-red)";
-            statusMsg.innerText = "❌ Network communication error.";
-        } finally {
-            btn.disabled = false;
-            btn.innerText = "Confirm Settlement & Submit TxID";
+            return devId;
         }
-    }
 
-    async function requestAnalysis() {
-        const codeInput = document.getElementById("codeBody").value;
-        const keyInput = document.getElementById("licenseKey").value;
-        const dash = document.getElementById("dashBlock");
-        const msg = document.getElementById("statusMsg");
-        const baseMetrics = document.getElementById("baseMetrics");
-        const proBanner = document.getElementById("proBanner");
-        const proUnlocked = document.getElementById("proUnlocked");
-        const cardMaintain = document.getElementById("cardMaintain");
-        const cardDebt = document.getElementById("cardDebt");
-        const proPatchText = document.getElementById("proPatchText");
-        const mapFlow = document.getElementById("mapFlow");
-        
-        try {
-            const response = await fetch("/api/v1/audit", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ code: codeInput, license_key: keyInput })
-            });
-            if (!response.ok) { alert("Server pipeline connectivity timeout."); return; }
-            const result = await response.json();
-            dash.style.display = "block";
-            msg.innerText = result.message;
-            
-            if (result.status === "syntax_error" || result.status === "empty") {
-                baseMetrics.style.display = "none"; proBanner.style.display = "none"; proUnlocked.style.display = "none";
-            } else if (result.status === "pro_success") {
-                baseMetrics.style.display = "grid"; proBanner.style.display = "none"; proUnlocked.style.display = "block";
-                document.getElementById("mLines").innerText = result.lines;
-                document.getElementById("mFuncs").innerText = result.functions_count;
-                document.getElementById("mClasses").innerText = result.classes_count;
-                document.getElementById("mMaintain").innerText = result.advanced_metrics.maintainability;
-                document.getElementById("mComments").innerText = result.advanced_metrics.comment_density;
-                document.getElementById("mDebt").innerText = result.advanced_metrics.tech_debt_usd;
-                document.getElementById("mTime").innerText = result.advanced_metrics.remediation_time;
-                proPatchText.innerText = result.advanced_metrics.remediation_patch;
-                
-                mapFlow.innerHTML = "";
-                result.advanced_metrics.visual_nodes.forEach(node => {
-                    const span = document.createElement("span");
-                    span.innerText = node.name; span.className = "node";
-                    if(node.type === "root") span.classList.add("node-root");
-                    else if(node.status === "unsecure") span.classList.add("node-unsecure");
-                    else span.classList.add("node-secure");
-                    mapFlow.appendChild(span);
-                });
-                
-                if (result.advanced_metrics.security_status === "unsecure") {
-                    cardMaintain.style.borderColor = "var(--danger-red)"; document.getElementById("mMaintain").style.color = "var(--danger-red)";
-                    cardDebt.style.borderColor = "var(--danger-red)"; document.getElementById("mDebt").style.color = "var(--danger-red)";
-                    proPatchText.style.borderColor = "var(--danger-red)";
-                } else {
-                    cardMaintain.style.borderColor = "#238636"; document.getElementById("mMaintain").style.color = "#7ee787";
-                    cardDebt.style.borderColor = "#30363d"; document.getElementById("mDebt").style.color = "#58a6ff";
-                    proPatchText.style.borderColor = "#30363d";
-                }
-            } else {
-                baseMetrics.style.display = "grid"; proBanner.style.display = "block"; proUnlocked.style.display = "none";
-                document.getElementById("mLines").innerText = result.lines;
-                document.getElementById("mFuncs").innerText = result.functions_count;
-                document.getElementById("mClasses").innerText = result.classes_count;
+        function saveKey() {
+            const key = document.getElementById('proKeyInput').value.trim();
+            localStorage.setItem('pro_key', key);
+            alert('Ключ сохранен!');
+            updateBadge();
+        }
+
+        function updateBadge() {
+            const key = localStorage.getItem('pro_key') || '';
+            document.getElementById('proKeyInput').value = key;
+            const badge = document.getElementById('statusBadge');
+            if (key) {
+                badge.innerText = 'PRO / KEY ACTIVE';
+                badge.className = 'px-3 py-1 bg-emerald-900/50 text-emerald-400 border border-emerald-700/50 rounded-full text-xs font-semibold';
             }
-        } catch (error) { console.error(error); alert("Critical interface layout interaction exception."); }
-    }
-</script>
+        }
 
+        function openPaymentModal() { document.getElementById('paymentModal').classList.remove('hidden'); }
+        function closePaymentModal() { document.getElementById('paymentModal').classList.add('hidden'); }
+
+        async function verifyPayment() {
+            const email = document.getElementById('payEmail').value.trim();
+            const txHash = document.getElementById('payTxHash').value.trim();
+            const btn = document.getElementById('payBtn');
+
+            if (!email || !txHash) return alert('Заполните Email и TX Hash');
+
+            btn.innerText = 'Проверка в блокчейне...';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/verify-direct-payment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tx_hash: txHash, email: email, device_id: getDeviceId() })
+                });
+                const data = await res.json();
+
+                if (res.ok) {
+                    localStorage.setItem('pro_key', data.pro_key);
+                    alert('🎉 Оплата подтверждена! Ваш Pro-ключ активирован!');
+                    closePaymentModal();
+                    updateBadge();
+                } else {
+                    alert('Ошибка: ' + (data.detail || 'Не удалось подтвердить платеж'));
+                }
+            } catch (e) {
+                alert('Ошибка сети: ' + e.message);
+            } finally {
+                btn.innerText = 'Проверить транзакцию';
+                btn.disabled = false;
+            }
+        }
+
+        async function runAudit() {
+            const code = document.getElementById('codeArea').value;
+            const proKey = localStorage.getItem('pro_key') || '';
+
+            if (!code) return alert('Вставьте код для анализа');
+
+            try {
+                const res = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code: code, pro_key: proKey, device_id: getDeviceId() })
+                });
+                const data = await res.json();
+
+                if (!res.ok) return alert('Ошибка: ' + (data.detail || 'Ошибка сервера'));
+
+                const resultsDiv = document.getElementById('results');
+                const findingsList = document.getElementById('findingsList');
+                resultsDiv.classList.remove('hidden');
+                findingsList.innerHTML = '';
+
+                if (data.findings.length === 0) {
+                    findingsList.innerHTML = '<p class="text-emerald-400 text-sm">✅ Явных критических уязвимостей не обнаружено.</p>';
+                } else {
+                    data.findings.forEach(f => {
+                        findingsList.innerHTML += `
+                            <div class="p-2.5 bg-slate-800 rounded-lg border border-slate-700 text-xs">
+                                <span class="font-bold text-rose-400">[Строка ${f.line}] [${f.type}]</span> 
+                                <span class="text-slate-200">${f.msg}</span>
+                            </div>
+                        `;
+                    });
+                }
+
+                if (data.hidden_findings_count > 0) {
+                    findingsList.innerHTML += `
+                        <div class="p-3 bg-amber-950/40 border border-amber-800/50 rounded-lg text-xs text-amber-300 mt-2">
+                            🔒 Найдено еще ${data.hidden_findings_count} уязвимостей. Активируйте PRO ключ, чтобы раскрыть полный отчет!
+                        </div>
+                    `;
+                }
+            } catch (e) {
+                alert('Ошибка сети: ' + e.message);
+            }
+        }
+
+        updateBadge();
+    </script>
 </body>
-</html>"""
-    return HTMLResponse(content=html_content)
+</html>
+"""
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_frontend():
+    return HTML_TEMPLATE.replace("{{OWNER_USDT_ADDRESS}}", OWNER_USDT_ADDRESS)
