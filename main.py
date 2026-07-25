@@ -10,7 +10,7 @@ from pydantic import BaseModel
 app = FastAPI(title="CodeInsight Anti-Leak SaaS")
 
 # ==========================================
-# ⚙️ НАСТРОЙКИ И ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
+# ⚙️ CONFIGURATION & ENVIRONMENT VARIABLES
 # ==========================================
 OWNER_USDT_ADDRESS = os.getenv("OWNER_USDT_ADDRESS", "TYourTronUSDTAddressHere")
 OWNER_MASTER_KEY = os.getenv("OWNER_MASTER_KEY", "SUPER_SECRET_OWNER_KEY_123")
@@ -19,9 +19,6 @@ SECRET_SIGNING_SALT = os.getenv("SECRET_SIGNING_SALT", "MY_SUPER_SALT_99")
 DEVICES_FILE = "registered_devices.json"
 TX_FILE = "used_transactions.json"
 
-# ==========================================
-# 📂 ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ХРАНЕНИЯ
-# ==========================================
 def load_json(filename: str) -> dict:
     if os.path.exists(filename):
         try:
@@ -35,44 +32,32 @@ def save_json(filename: str, data: dict):
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-# ==========================================
-# 🔑 ГЕНЕРАЦИЯ И ВАЛИДАЦИЯ КЛЮЧЕЙ
-# ==========================================
 def generate_pro_key(email: str) -> str:
     clean_email = email.lower().strip()
-    expires_ts = int(time.time()) + (3650 * 86400) # Ключ на 10 лет
+    expires_ts = int(time.time()) + (3650 * 86400)
     raw_string = f"{clean_email}:{expires_ts}:{SECRET_SIGNING_SALT}"
     key_hash = hashlib.sha256(raw_string.encode()).hexdigest()[:16]
     return f"{clean_email}:{expires_ts}:{key_hash}"
 
 def validate_pro_key(key: str) -> tuple[bool, str]:
     if not key:
-        return False, "Ключ не предоставлен"
-    
+        return False, "Key not provided"
     parts = key.split(":")
     if len(parts) != 3:
-        return False, "Неверный формат ключа"
-    
+        return False, "Invalid key format"
     email, expires_str, key_hash = parts
     try:
         expires_ts = int(expires_str)
     except ValueError:
-        return False, "Неверный формат даты в ключе"
-    
+        return False, "Invalid expiration date format"
     if expires_ts < int(time.time()):
-        return False, "Срок действия ключа истек"
-    
-    raw_string = f"{email}:{expires_ts}:{SECRET_SIGNING_SALT}"
+        return False, "Key has expired"
+    raw_string = f"{email}:{expires_str}:{SECRET_SIGNING_SALT}"
     expected_hash = hashlib.sha256(raw_string.encode()).hexdigest()[:16]
-    
     if key_hash != expected_hash:
-        return False, "Подпись ключа недействительна"
-    
+        return False, "Invalid key signature"
     return True, email
 
-# ==========================================
-# 📦 МОДЕЛИ ЗАПРОСОВ (PYDANTIC)
-# ==========================================
 class PaymentVerificationRequest(BaseModel):
     tx_hash: str
     email: str
@@ -83,10 +68,6 @@ class AuditRequest(BaseModel):
     pro_key: str = ""
     device_id: str
 
-# ==========================================
-# 🚀 API ЭНДПОИНТЫ
-# ==========================================
-
 @app.post("/api/verify-direct-payment")
 async def verify_payment(req: PaymentVerificationRequest):
     tx_hash = req.tx_hash.strip()
@@ -94,27 +75,24 @@ async def verify_payment(req: PaymentVerificationRequest):
     device_id = req.device_id.strip()
 
     if not tx_hash or not email or not device_id:
-        raise HTTPException(status_code=400, detail="Заполните все поля")
+        raise HTTPException(status_code=400, detail="Please fill in all fields")
 
-    # 1. Проверка на повторный ввод хэша
     used_txs = load_json(TX_FILE)
     if tx_hash in used_txs:
-        raise HTTPException(status_code=400, detail="Этот хэш транзакции уже был использован!")
+        raise HTTPException(status_code=400, detail="This transaction hash has already been used!")
 
-    # 2. Запрос к TronScan API с маскировкой под браузер (User-Agent)
     url = f"https://apilist.tronscanapi.com/api/transaction-info?hash={tx_hash}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     
     async with httpx.AsyncClient(timeout=12.0) as client:
         try:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
-                raise HTTPException(status_code=400, detail="Не удалось связаться с нодой TRON")
+                raise HTTPException(status_code=400, detail="Failed to connect to TRON node")
             data = resp.json()
         except Exception:
-            raise HTTPException(status_code=400, detail="Ошибка сети при проверке транзакции")
+            raise HTTPException(status_code=400, detail="Network error during payment verification")
 
-    # 3. Валидация перевода USDT
     trc20_transfers = data.get("trc20TransferInfo", [])
     valid_payment_found = False
 
@@ -122,7 +100,6 @@ async def verify_payment(req: PaymentVerificationRequest):
         recipient = transfer.get("to_address", "")
         amount_str = transfer.get("amount_str", "0")
         symbol = transfer.get("symbol", "")
-
         amount_usdt = float(amount_str) / 1000000.0
 
         if recipient == OWNER_USDT_ADDRESS and amount_usdt >= 8.90 and symbol.upper() == "USDT":
@@ -132,21 +109,18 @@ async def verify_payment(req: PaymentVerificationRequest):
     if not valid_payment_found:
         raise HTTPException(
             status_code=400, 
-            detail=f"Транзакция не найдена или сумма меньше $9.99 USDT (Адрес получателя: {OWNER_USDT_ADDRESS})"
+            detail=f"Transaction not found or amount is less than $9.99 USDT (Expected recipient: {OWNER_USDT_ADDRESS})"
         )
 
-    # 4. Фиксация транзакции
     used_txs[tx_hash] = {"email": email, "time": int(time.time()), "device_id": device_id}
     save_json(TX_FILE, used_txs)
 
-    # 5. Выдача ключа и привязка к Device ID
     new_key = generate_pro_key(email)
     devices = load_json(DEVICES_FILE)
     devices[new_key] = device_id
     save_json(DEVICES_FILE, devices)
 
-    return {"status": "success", "pro_key": new_key, "message": "Оплата успешно подтверждена!"}
-
+    return {"status": "success", "pro_key": new_key, "message": "Payment verified successfully!"}
 
 @app.post("/api/analyze")
 async def analyze_code(req: AuditRequest):
@@ -161,19 +135,16 @@ async def analyze_code(req: AuditRequest):
     if pro_key and pro_key == OWNER_MASTER_KEY:
         is_owner = True
         is_pro = True
-        user_email = "OWNER (Администратор)"
+        user_email = "OWNER (Administrator)"
     elif pro_key:
         valid, email_or_err = validate_pro_key(pro_key)
         if not valid:
-            raise HTTPException(status_code=400, detail=f"Ошибка ключа: {email_or_err}")
+            raise HTTPException(status_code=400, detail=f"Key error: {email_or_err}")
         
         devices = load_json(DEVICES_FILE)
         if pro_key in devices:
             if devices[pro_key] != device_id:
-                raise HTTPException(
-                    status_code=403, 
-                    detail="⛔ Защита от слива: Этот ключ привязан к другому устройству!"
-                )
+                raise HTTPException(status_code=403, detail="⛔ Anti-Leak Protection: Key bound to another device!")
         else:
             devices[pro_key] = device_id
             save_json(DEVICES_FILE, devices)
@@ -186,12 +157,12 @@ async def analyze_code(req: AuditRequest):
     
     for idx, line in enumerate(lines, 1):
         if "eval(" in line or "exec(" in line:
-            findings.append({"line": idx, "type": "CRITICAL", "msg": "Опасное выполнение динамического кода (eval/exec)"})
+            findings.append({"line": idx, "type": "CRITICAL", "msg": "Dangerous dynamic code execution found (eval/exec)"})
         if "SELECT " in line.upper() and "+" in line:
-            findings.append({"line": idx, "type": "HIGH", "msg": "Возможная SQL-инъекция через конкатенацию строк"})
+            findings.append({"line": idx, "type": "HIGH", "msg": "Potential SQL Injection via string concatenation"})
         if "api_key" in line.lower() or "secret" in line.lower():
             if "=" in line and not line.strip().startswith("#"):
-                findings.append({"line": idx, "type": "MEDIUM", "msg": "Обнаружен открытый API ключ или секрет в коде"})
+                findings.append({"line": idx, "type": "MEDIUM", "msg": "Exposed API Key or plaintext secret detected"})
 
     if not is_pro and len(findings) > 1:
         hidden_count = len(findings) - 1
@@ -209,86 +180,82 @@ async def analyze_code(req: AuditRequest):
         "is_pro": is_pro
     }
 
-# ==========================================
-# 🖥️ ВЕБ-ИНТЕРФЕЙС (HTML ШАБЛОН)
-# ==========================================
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CodeInsight — Автономный Аудит Безопасности</title>
+    <title>CodeInsight — Autonomous Security Audit</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { background-color: #0f172a; color: #f8fafc; }
+    <style> 
+        body { background-color: #0b0f19; color: #f8fafc; } 
     </style>
 </head>
 <body class="min-h-screen flex flex-col items-center justify-center p-4">
-    <div class="max-w-4xl w-full bg-slate-800 border border-slate-700 rounded-2xl p-6 shadow-2xl">
-        <div class="flex justify-between items-center border-b border-slate-700 pb-4 mb-6">
-            <div>
-                <h1 class="text-2xl font-bold text-indigo-400">🛡️ CodeInsight SaaS</h1>
-                <p class="text-xs text-slate-400">Автономный анти-лик сканер уязвимостей</p>
-            </div>
-            <div class="text-right">
-                <span id="statusBadge" class="px-3 py-1 bg-slate-700 text-slate-300 rounded-full text-xs font-semibold">FREE Plan</span>
+    <div class="max-w-3xl w-full bg-slate-900 border border-emerald-500/30 rounded-2xl p-8 shadow-2xl shadow-emerald-950/20 text-center">
+        
+        <div class="flex flex-col items-center border-b border-slate-800 pb-6 mb-6">
+            <h1 class="text-3xl font-extrabold text-emerald-400 tracking-tight mb-1">🛡️ CodeInsight SaaS</h1>
+            <p class="text-xs text-emerald-500/70 font-mono tracking-wider uppercase">Autonomous Anti-Leak Vulnerability Scanner</p>
+            <div class="mt-4">
+                <span id="statusBadge" class="px-4 py-1.5 bg-slate-800 text-slate-400 border border-slate-700 rounded-full text-xs font-bold uppercase tracking-wider">FREE Plan</span>
             </div>
         </div>
 
-        <div class="mb-4 bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
-            <label class="block text-xs font-semibold text-slate-400 mb-1">🔑 Ваш Pro / Owner Ключ:</label>
-            <div class="flex gap-2">
-                <input type="password" id="proKeyInput" placeholder="Вставьте ключ или Master-пароль" 
-                       class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
-                <button onclick="saveKey()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
-                    Сохранить
+        <div class="mb-6 bg-slate-950/60 p-5 rounded-xl border border-emerald-500/10 text-left">
+            <label class="block text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">🔑 Your Pro / Owner Key:</label>
+            <div class="flex flex-col sm:flex-row gap-2">
+                <input type="password" id="proKeyInput" placeholder="Enter Pro Key or Master Password" 
+                       class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-center sm:text-left focus:outline-none focus:border-emerald-500 transition">
+                <button onclick="saveKey()" class="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm transition shadow-lg shadow-emerald-900/20">
+                    Activate
                 </button>
-                <button onclick="openPaymentModal()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">
-                    Купить PRO ($9.99)
+                <button onclick="openPaymentModal()" class="bg-slate-800 hover:bg-slate-700 border border-emerald-500/20 text-emerald-400 font-bold px-5 py-2.5 rounded-xl text-sm transition">
+                    Get PRO ($9.99)
                 </button>
             </div>
         </div>
 
-        <div class="mb-4">
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Исходный код для аудита:</label>
-            <textarea id="codeArea" rows="8" placeholder="Вставьте ваш Python код здесь..." 
-                      class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm font-mono focus:outline-none focus:border-indigo-500"></textarea>
+        <div class="mb-6 text-left">
+            <label class="block text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">Source Code for Audit:</label>
+            <textarea id="codeArea" rows="9" placeholder="Paste your Python source code here..." 
+                      class="w-full bg-slate-950 border border-slate-700 rounded-xl p-4 text-sm font-mono focus:outline-none focus:border-emerald-500 transition"></textarea>
         </div>
 
-        <button onclick="runAudit()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl font-bold text-base shadow-lg transition">
-            🔍 Запустить Безопасный Аудит
+        <button onclick="runAudit()" class="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 py-3.5 rounded-xl font-extrabold text-base tracking-wide shadow-lg shadow-emerald-500/10 transition uppercase">
+            🔍 Run Secure Audit
         </button>
 
-        <div id="results" class="mt-6 hidden bg-slate-900 p-4 rounded-xl border border-slate-700">
-            <h3 class="text-sm font-bold text-slate-300 mb-2">Отчет аудита:</h3>
-            <div id="findingsList" class="space-y-2"></div>
+        <div id="results" class="mt-6 hidden bg-slate-950 p-5 rounded-xl border border-slate-800 text-left">
+            <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3">Audit Report:</h3>
+            <div id="findingsList" class="space-y-2.5"></div>
         </div>
     </div>
 
-    <div id="paymentModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden p-4">
-        <div class="bg-slate-800 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
-            <button onclick="closePaymentModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white">✕</button>
-            <h2 class="text-xl font-bold text-emerald-400 mb-2">Оплата PRO через USDT (TRC-20)</h2>
-            <p class="text-xs text-slate-400 mb-4">Автономная активация без посредников за 10 секунд.</p>
+    <div id="paymentModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden p-4 z-50">
+        <div class="bg-slate-900 border border-emerald-500/30 rounded-2xl max-w-md w-full p-6 shadow-2xl text-center relative">
+            <button onclick="closePaymentModal()" class="absolute top-4 right-4 text-slate-500 hover:text-white transition">✕</button>
+            <h2 class="text-2xl font-black text-emerald-400 mb-1">PRO Upgrade</h2>
+            <p class="text-xs text-slate-400 mb-5">USDT (TRC-20) Instant Autonomous Activation</p>
 
-            <div class="bg-slate-900 p-3 rounded-xl mb-4 text-center border border-slate-700">
-                <p class="text-xs text-slate-400 mb-1">Отправьте ровно <strong class="text-emerald-400">$9.99 USDT</strong> на адрес:</p>
-                <p class="text-xs font-mono font-bold text-slate-200 select-all break-all">{{OWNER_USDT_ADDRESS}}</p>
-                <p class="text-[10px] text-amber-400 mt-2">⚠️ При выводе с биржи учитывайте комиссию, на кошелек должно прийти не менее $9.99!</p>
+            <div class="bg-slate-950 p-4 rounded-xl mb-5 text-center border border-emerald-500/10">
+                <p class="text-xs text-slate-400 mb-2">Send exactly <strong class="text-emerald-400">$9.99 USDT</strong> to:</p>
+                <p class="text-xs font-mono font-bold text-emerald-300 bg-slate-900 py-2 px-3 rounded-lg select-all break-all border border-slate-800">{{OWNER_USDT_ADDRESS}}</p>
+                <p class="text-[10px] text-amber-500/90 mt-2">⚠️ If sending from an exchange, make sure to cover network fees. Exactly $9.99 must arrive!</p>
             </div>
 
-            <div class="space-y-3">
+            <div class="space-y-4 text-left">
                 <div>
-                    <label class="block text-xs text-slate-400 mb-1">Ваш Email (для генерации ключа):</label>
-                    <input type="email" id="payEmail" placeholder="your@email.com" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm">
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Your Email (for key generation):</label>
+                    <input type="email" id="payEmail" placeholder="your@email.com" class="w-full bg-slate-950 border border-slate-750 rounded-lg p-2.5 text-sm focus:outline-none focus:border-emerald-500">
                 </div>
                 <div>
-                    <label class="block text-xs text-slate-400 mb-1">Хэш транзакции (TX Hash):</label>
-                    <input type="text" id="payTxHash" placeholder="Введите TX Hash из кошелька" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm">
+                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Transaction Hash (TX Hash):</label>
+                    <input type="text" id="payTxHash" placeholder="Paste your TRON TX Hash here" class="w-full bg-slate-950 border border-slate-750 rounded-lg p-2.5 text-sm focus:outline-none focus:border-emerald-500">
                 </div>
-                <button onclick="verifyPayment()" id="payBtn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-bold text-sm transition">
-                    Проверить транзакцию
+                <button onclick="verifyPayment()" id="payBtn" class="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 py-3 rounded-xl font-bold text-sm tracking-wide transition uppercase">
+                    Verify Transaction
                 </button>
             </div>
         </div>
@@ -307,7 +274,7 @@ HTML_TEMPLATE = """
         function saveKey() {
             const key = document.getElementById('proKeyInput').value.trim();
             localStorage.setItem('pro_key', key);
-            alert('Ключ сохранен!');
+            alert('Key saved locally!');
             updateBadge();
         }
 
@@ -317,7 +284,10 @@ HTML_TEMPLATE = """
             const badge = document.getElementById('statusBadge');
             if (key) {
                 badge.innerText = 'PRO / KEY ACTIVE';
-                badge.className = 'px-3 py-1 bg-emerald-900/50 text-emerald-400 border border-emerald-700/50 rounded-full text-xs font-semibold';
+                badge.className = 'px-4 py-1.5 bg-emerald-950/40 text-emerald-400 border border-emerald-500/40 rounded-full text-xs font-bold uppercase tracking-wider';
+            } else {
+                badge.innerText = 'FREE Plan';
+                badge.className = 'px-4 py-1.5 bg-slate-800 text-slate-400 border border-slate-700 rounded-full text-xs font-bold uppercase tracking-wider';
             }
         }
 
@@ -329,9 +299,9 @@ HTML_TEMPLATE = """
             const txHash = document.getElementById('payTxHash').value.trim();
             const btn = document.getElementById('payBtn');
 
-            if (!email || !txHash) return alert('Заполните Email и TX Hash');
+            if (!email || !txHash) return alert('Please enter both Email and TX Hash');
 
-            btn.innerText = 'Проверка в блокчейне...';
+            btn.innerText = 'Checking Blockchain...';
             btn.disabled = true;
 
             try {
@@ -344,16 +314,16 @@ HTML_TEMPLATE = """
 
                 if (res.ok) {
                     localStorage.setItem('pro_key', data.pro_key);
-                    alert('🎉 Оплата подтверждена! Ваш Pro-ключ активирован!');
+                    alert('🎉 Payment verified! Your Pro Key is now active!');
                     closePaymentModal();
                     updateBadge();
                 } else {
-                    alert('Ошибка: ' + (data.detail || 'Не удалось подтвердить платеж'));
+                    alert('Error: ' + (data.detail || 'Payment verification failed'));
                 }
             } catch (e) {
-                alert('Ошибка сети: ' + e.message);
+                alert('Network error: ' + e.message);
             } finally {
-                btn.innerText = 'Проверить транзакцию';
+                btn.innerText = 'Verify Transaction';
                 btn.disabled = false;
             }
         }
@@ -362,7 +332,7 @@ HTML_TEMPLATE = """
             const code = document.getElementById('codeArea').value;
             const proKey = localStorage.getItem('pro_key') || '';
 
-            if (!code) return alert('Вставьте код для анализа');
+            if (!code) return alert('Please paste some code to analyze');
 
             try {
                 const res = await fetch('/api/analyze', {
@@ -372,7 +342,7 @@ HTML_TEMPLATE = """
                 });
                 const data = await res.json();
 
-                if (!res.ok) return alert('Ошибка: ' + (data.detail || 'Ошибка сервера'));
+                if (!res.ok) return alert('Error: ' + (data.detail || 'Server error'));
 
                 const resultsDiv = document.getElementById('results');
                 const findingsList = document.getElementById('findingsList');
@@ -380,13 +350,13 @@ HTML_TEMPLATE = """
                 findingsList.innerHTML = '';
 
                 if (data.findings.length === 0) {
-                    findingsList.innerHTML = '<p class="text-emerald-400 text-sm">✅ Явных критических уязвимостей не обнаружено.</p>';
+                    findingsList.innerHTML = '<p class="text-emerald-400 text-sm font-semibold">✅ No critical vulnerabilities detected.</p>';
                 } else {
                     data.findings.forEach(f => {
                         findingsList.innerHTML += `
-                            <div class="p-2.5 bg-slate-800 rounded-lg border border-slate-700 text-xs">
-                                <span class="font-bold text-rose-400">[Строка ${f.line}] [${f.type}]</span> 
-                                <span class="text-slate-200">${f.msg}</span>
+                            <div class="p-3 bg-slate-900 border border-slate-800 rounded-xl text-xs flex flex-col gap-1">
+                                <span class="font-bold uppercase tracking-wide text-rose-400">[Line ${f.line}] [${f.type}]</span> 
+                                <span class="text-slate-300">${f.msg}</span>
                             </div>
                         `;
                     });
@@ -394,13 +364,13 @@ HTML_TEMPLATE = """
 
                 if (data.hidden_findings_count > 0) {
                     findingsList.innerHTML += `
-                        <div class="p-3 bg-amber-950/40 border border-amber-800/50 rounded-lg text-xs text-amber-300 mt-2">
-                            🔒 Найдено еще ${data.hidden_findings_count} уязвимостей. Активируйте PRO ключ, чтобы раскрыть полный отчет!
+                        <div class="p-4 bg-amber-950/30 border border-amber-500/20 rounded-xl text-xs text-amber-400 mt-2 font-medium">
+                            🔒 Bound protection: ${data.hidden_findings_count} more vulnerabilities found. Activate your PRO key to unhide the full report!
                         </div>
                     `;
                 }
             } catch (e) {
-                alert('Ошибка сети: ' + e.message);
+                alert('Network error: ' + e.message);
             }
         }
 
