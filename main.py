@@ -294,7 +294,7 @@ HTML_TEMPLATE = """
         <div class="mb-6 bg-slate-950/60 p-5 rounded-xl border border-slate-800 text-left">
             <label class="block text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">🔑 Pro License Access Token (Optional):</label>
             <div class="flex flex-col sm:flex-row gap-2">
-                <input type="password" id="proKeyInput" placeholder="Leave empty for Standard Mode or paste key..." 
+                <input type="password" id="proKeyInput" placeholder="Leave empty for Standard Mode or paste key..." autocomplete="off"
                        class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-center sm:text-left text-slate-200 focus:outline-none focus:border-emerald-500 transition">
                 <button onclick="saveKey()" class="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm transition shadow-lg shadow-emerald-900/20">
                     Activate
@@ -428,13 +428,18 @@ HTML_TEMPLATE = """
             const key = document.getElementById('proKeyInput').value.trim();
             localStorage.setItem('pro_key', key);
             updateBadge();
-            if(key) alert('Pro Key saved locally!');
+            if(key) {
+                alert('Pro Key activated and saved!');
+            } else {
+                alert('Key cleared. Returned to Free Plan.');
+            }
         }
 
         function updateBadge() {
             const key = localStorage.getItem('pro_key') || '';
-            document.getElementById('proKeyInput').value = key;
             const badge = document.getElementById('statusBadge');
+            
+            // Важно: значение не подставляется в инпут автоматически, сохраняя аккуратный вид
             if (key) {
                 badge.innerText = 'PRO / KEY ACTIVE';
                 badge.className = 'px-4 py-1.5 bg-emerald-950/60 text-emerald-400 border border-emerald-500/40 rounded-full text-xs font-bold uppercase tracking-wider';
@@ -483,7 +488,9 @@ HTML_TEMPLATE = """
 
         async function runAudit() {
             const code = document.getElementById('codeArea').value;
-            const proKey = localStorage.getItem('pro_key') || '';
+            const inputKey = document.getElementById('proKeyInput').value.trim();
+            const storedKey = localStorage.getItem('pro_key') || '';
+            const proKey = inputKey || storedKey;
 
             if (!code.trim()) return alert('Please paste some Python code to analyze');
 
