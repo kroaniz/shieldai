@@ -45,11 +45,9 @@ def validate_pro_key(key: str) -> tuple[bool, str]:
     if not clean_key:
         return False, "Key not provided"
     
-    # Режим супер-ключа владельца
     if clean_key == OWNER_MASTER_KEY:
         return True, "OWNER (Administrator)"
 
-    # Проверка ключа формата email:expires:hash
     parts = clean_key.split(":")
     if len(parts) != 3:
         return False, "Invalid key format"
@@ -144,7 +142,6 @@ async def analyze_code(req: AuditRequest):
     if not source_code.strip():
         raise HTTPException(status_code=400, detail="Source code is empty. Please paste your Python code.")
 
-    # 1. Проверка синтаксиса AST (Доступно всем)
     try:
         tree = ast.parse(source_code)
     except SyntaxError as e:
@@ -158,18 +155,18 @@ async def analyze_code(req: AuditRequest):
     lines_count = len(raw_lines)
     functions = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
     classes = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+    imports = [node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))]
     comment_lines = sum(1 for line in raw_lines if line.strip().startswith("#"))
 
-    # Базовые данные, доступные в бесплатной версии
     base_data = {
         "status": "success",
         "lines": lines_count,
         "functions_count": len(functions),
         "classes_count": len(classes),
+        "imports_count": len(imports),
         "message": "Basic AST structural audit completed. Syntax is valid."
     }
 
-    # 2. Проверка PRO лицензии
     is_pro = False
     user_email = "Free Plan"
 
@@ -190,11 +187,9 @@ async def analyze_code(req: AuditRequest):
     base_data["is_pro"] = is_pro
     base_data["user_email"] = user_email
 
-    # Если обычный Free-пользователь — возвращаем базовые метрики и предложение купить PRO
     if not is_pro:
         return base_data
 
-    # 3. Расширенная PRO Аналитика
     comment_density = round((comment_lines / lines_count) * 100) if lines_count > 0 else 0
     detected_issues = []
     has_unsafe_execution = False
@@ -225,12 +220,7 @@ async def analyze_code(req: AuditRequest):
 
     if detected_issues:
         issues_formatted = "\n".join([f"- {issue}" for issue in detected_issues])
-        patch_advice = f"""### ⚠️ CRITICAL INFRASTRUCTURE RISKS DETECTED:
-{issues_formatted}
-
-### 🛡️ AUTOMATED REMEDIATION PATCH:
-```python
-# [FIXED] Security Hardening Patch Applied Successfully
+        patch_advice = f"""# [FIXED] Security Hardening Patch
 import os
 import shlex
 import subprocess
@@ -240,12 +230,11 @@ db_token = os.getenv('VAULT_SECRET_TOKEN')
 
 def safe_execution(cmd_str):
     args = shlex.split(cmd_str)
-    return subprocess.run(args, capture_output=True, text=True, check=True)
-```"""
+    return subprocess.run(args, capture_output=True, text=True, check=True)"""
         maintainability = "Critical Risk"
         security_status = "unsecure"
     else:
-        patch_advice = "### ✨ ARCHITECTURE STANDARDS COMPLIANT:\nCode syntax density, scope isolation, and function parameters are fully optimized."
+        patch_advice = "# ARCHITECTURE STANDARDS COMPLIANT\n# Code syntax density, scope isolation, and function parameters are fully optimized."
         maintainability = "Excellent"
         security_status = "secure"
 
@@ -290,7 +279,7 @@ HTML_TEMPLATE = """
             </div>
         </div>
 
-        <!-- License Input -->
+        <!-- License Input Area -->
         <div class="mb-6 bg-slate-950/60 p-5 rounded-xl border border-slate-800 text-left">
             <label class="block text-xs font-bold text-emerald-400 uppercase tracking-wider mb-2">🔑 Pro License Access Token (Optional):</label>
             <div class="flex flex-col sm:flex-row gap-2">
@@ -303,6 +292,12 @@ HTML_TEMPLATE = """
                     Get PRO ($9.99)
                 </button>
             </div>
+            
+            <!-- Active Session Bar -->
+            <div id="activeSessionInfo" class="mt-3 hidden flex items-center justify-between bg-emerald-950/40 border border-emerald-500/30 px-3 py-2 rounded-lg text-xs">
+                <span class="text-emerald-400 font-mono font-medium" id="activeKeyText">Active Key: Pro Enabled</span>
+                <button onclick="clearKey()" class="text-slate-400 hover:text-red-400 font-bold underline transition ml-2">Clear / Logout</button>
+            </div>
         </div>
 
         <!-- Code Area -->
@@ -312,7 +307,7 @@ HTML_TEMPLATE = """
                       class="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm font-mono text-slate-200 focus:outline-none focus:border-emerald-500 transition"></textarea>
         </div>
 
-        <button onclick="runAudit()" class="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 py-4 rounded-xl font-extrabold text-base tracking-wide transition uppercase shadow-lg shadow-emerald-500/10">
+        <button id="scanBtn" onclick="runAudit()" class="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 py-4 rounded-xl font-extrabold text-base tracking-wide transition uppercase shadow-lg shadow-emerald-500/10">
             🔍 Execute Core Infrastructure Scan
         </button>
 
@@ -378,7 +373,13 @@ HTML_TEMPLATE = """
                 </div>
 
                 <!-- Remediation Code Snippet -->
-                <pre id="proPatchText" class="p-4 bg-slate-950 border border-slate-800 rounded-xl font-mono text-xs text-emerald-400 overflow-x-auto whitespace-pre-wrap"></pre>
+                <div class="relative">
+                    <div class="flex items-center justify-between bg-slate-900 border border-slate-800 px-4 py-2 rounded-t-xl">
+                        <span class="text-xs font-mono text-emerald-400 font-bold">🛡️ AUTOMATED REMEDIATION PATCH</span>
+                        <button onclick="copyPatch()" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-slate-950 px-3 py-1 rounded-md font-bold transition">Copy Patch</button>
+                    </div>
+                    <pre id="proPatchText" class="p-4 bg-slate-950 border-x border-b border-slate-800 rounded-b-xl font-mono text-xs text-emerald-400 overflow-x-auto whitespace-pre-wrap"></pre>
+                </div>
             </div>
 
         </div>
@@ -426,27 +427,43 @@ HTML_TEMPLATE = """
 
         function saveKey() {
             const key = document.getElementById('proKeyInput').value.trim();
-            localStorage.setItem('pro_key', key);
-            updateBadge();
-            if(key) {
+            if (key) {
+                localStorage.setItem('pro_key', key);
+                document.getElementById('proKeyInput').value = '';
+                updateBadge();
                 alert('Pro Key activated and saved!');
             } else {
-                alert('Key cleared. Returned to Free Plan.');
+                alert('Please paste a key first');
             }
+        }
+
+        function clearKey() {
+            localStorage.removeItem('pro_key');
+            updateBadge();
+            alert('Pro Session cleared.');
         }
 
         function updateBadge() {
             const key = localStorage.getItem('pro_key') || '';
             const badge = document.getElementById('statusBadge');
+            const sessionInfo = document.getElementById('activeSessionInfo');
+            const activeKeyText = document.getElementById('activeKeyText');
             
-            // Важно: значение не подставляется в инпут автоматически, сохраняя аккуратный вид
             if (key) {
                 badge.innerText = 'PRO / KEY ACTIVE';
                 badge.className = 'px-4 py-1.5 bg-emerald-950/60 text-emerald-400 border border-emerald-500/40 rounded-full text-xs font-bold uppercase tracking-wider';
+                sessionInfo.classList.remove('hidden');
+                activeKeyText.innerText = 'Active Token: ' + (key.length > 15 ? key.substring(0, 12) + '...' : key);
             } else {
                 badge.innerText = 'FREE PLAN';
                 badge.className = 'px-4 py-1.5 bg-slate-800 text-slate-400 border border-slate-700 rounded-full text-xs font-bold uppercase tracking-wider';
+                sessionInfo.classList.add('hidden');
             }
+        }
+
+        function copyPatch() {
+            const text = document.getElementById('proPatchText').innerText;
+            navigator.clipboard.writeText(text).then(() => alert('Patch copied to clipboard!'));
         }
 
         function openPaymentModal() { document.getElementById('paymentModal').classList.remove('hidden'); }
@@ -491,8 +508,12 @@ HTML_TEMPLATE = """
             const inputKey = document.getElementById('proKeyInput').value.trim();
             const storedKey = localStorage.getItem('pro_key') || '';
             const proKey = inputKey || storedKey;
+            const scanBtn = document.getElementById('scanBtn');
 
             if (!code.trim()) return alert('Please paste some Python code to analyze');
+
+            scanBtn.innerText = '⏳ Analyzing Python AST Tree...';
+            scanBtn.disabled = true;
 
             try {
                 const res = await fetch('/api/analyze', {
@@ -548,6 +569,9 @@ HTML_TEMPLATE = """
 
             } catch (e) {
                 alert('Network error: ' + e.message);
+            } finally {
+                scanBtn.innerText = '🔍 Execute Core Infrastructure Scan';
+                scanBtn.disabled = false;
             }
         }
 
